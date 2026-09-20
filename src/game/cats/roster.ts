@@ -181,6 +181,61 @@ export const CAT_ROSTER: CatDef[] = [
       },
     },
   },
+  {
+    id: 'ninja_cat',
+    name: 'Ninja Cat',
+    rarity: 'rare',
+    cost: 9,
+    sellValue: 4,
+    icon: '🥷',
+    description: '+50 Chips if this is the first hand played this round.',
+    effects: {
+      onHandPlayed: (state, ctx) => {
+        if (ctx.handsPlayedThisRound === 0) state.chips += 50
+      },
+    },
+  },
+  // -- Super Rare --
+  {
+    id: 'valkyrie_cat',
+    name: 'Valkyrie Cat',
+    rarity: 'super_rare',
+    cost: 10,
+    sellValue: 5,
+    icon: '⚔️',
+    description: '+5 Mult for each King that scores.',
+    effects: {
+      onCardScored: (state, ctx) => {
+        if (ctx.card.rank === 13) state.mult += 5
+      },
+    },
+  },
+  {
+    id: 'kabuki_cat',
+    name: 'Kabuki Cat',
+    rarity: 'super_rare',
+    cost: 10,
+    sellValue: 5,
+    icon: '🎭',
+    description: 'x2 Mult if the played hand is a Full House or Flush House.',
+    effects: {
+      onHandPlayed: (state, ctx) => {
+        if (ctx.handType === 'full_house' || ctx.handType === 'flush_house') state.mult *= 2
+      },
+    },
+  },
+  {
+    id: 'whale_cat',
+    name: 'Whale Cat',
+    rarity: 'super_rare',
+    cost: 9,
+    sellValue: 4,
+    icon: '🐳',
+    description: '+$3 whenever you win a round.',
+    effects: {
+      onRoundEnd: (ctx) => (ctx.won ? 3 : 0),
+    },
+  },
   // -- Uber Rare --
   {
     id: 'cyberpunk_cat',
@@ -208,6 +263,20 @@ export const CAT_ROSTER: CatDef[] = [
       onHandPlayed: (state, ctx) => {
         state.chips += 5
         if (ctx.handType === 'straight_flush') state.mult *= 3
+      },
+    },
+  },
+  {
+    id: 'metal_cat',
+    name: 'Metal Cat',
+    rarity: 'uber',
+    cost: 12,
+    sellValue: 6,
+    icon: '🔩',
+    description: '+5 Chips for every card that scores.',
+    effects: {
+      onCardScored: (state) => {
+        state.chips += 5
       },
     },
   },

@@ -1,7 +1,9 @@
 import { Card } from './Card'
 import { CatRow } from './CatRow'
+import { bossBlindForAnte } from '../game/blinds'
+import { suitSymbol } from '../game/cards'
 import { evaluateHand } from '../game/handEvaluator'
-import { handTypeDef } from '../data/handTypes'
+import { handTypeAtLevel, handTypeDef } from '../data/handTypes'
 import { useGameStore } from '../state/useGameStore'
 
 export function PlayingScreen() {
@@ -13,8 +15,11 @@ export function PlayingScreen() {
   const selectedCards = run.hand.filter((c) => run.selectedIds.includes(c.id))
   const preview = selectedCards.length > 0 ? evaluateHand(selectedCards) : null
   const previewDef = preview ? handTypeDef(preview.handType) : null
+  const previewLevel = preview ? run.handLevels[preview.handType] ?? 1 : 1
+  const previewAtLevel = preview ? handTypeAtLevel(preview.handType, previewLevel) : null
 
   const remaining = run.target - run.roundScore
+  const boss = run.blind === 'boss' ? bossBlindForAnte(run.ante) : null
 
   return (
     <div className="flex flex-col gap-4">
@@ -38,9 +43,9 @@ export function PlayingScreen() {
             </div>
           </div>
         </div>
-        {run.catsDisabledThisRound && (
+        {boss && (
           <div className="mt-2 rounded bg-red-950 px-2 py-1 text-xs text-red-300">
-            This boss has disabled all Cat abilities for the round!
+            {boss.name}: {boss.description}
           </div>
         )}
         {run.lastResult && (
@@ -58,8 +63,8 @@ export function PlayingScreen() {
 
       <div className="flex flex-col items-center gap-4 rounded-lg bg-zinc-900 p-4">
         <div className="h-6 text-sm text-zinc-400">
-          {previewDef
-            ? `${previewDef.label} — base ${previewDef.baseChips} chips × ${previewDef.baseMult} mult`
+          {previewDef && previewAtLevel
+            ? `${previewDef.label} Lv.${previewLevel} — base ${previewAtLevel.chips} chips × ${previewAtLevel.mult} mult`
             : 'Select up to 5 cards'}
         </div>
         <div className="flex flex-wrap justify-center gap-2">
@@ -72,6 +77,11 @@ export function PlayingScreen() {
             />
           ))}
         </div>
+        {run.bannedSuitThisRound && (
+          <div className="text-xs text-red-400">
+            {suitSymbol(run.bannedSuitThisRound)} cards score 0 Chips this round
+          </div>
+        )}
         <div className="flex gap-3">
           <button
             type="button"

@@ -1,8 +1,53 @@
 import { CatRow } from './CatRow'
 import { catDef } from '../game/cats/roster'
 import { RARITY_COLORS, RARITY_LABELS } from '../game/cats/types'
-import { MAX_CAT_SLOTS, rerollCost } from '../game/shop'
+import { PACK_INFO, effectiveMaxCatSlots } from '../game/packs'
+import { rerollCost, type ShopSlot } from '../game/shop'
 import { useGameStore } from '../state/useGameStore'
+
+function CatSlotCard({ slot, affordable, onBuy }: { slot: ShopSlot; affordable: boolean; onBuy: () => void }) {
+  const def = catDef(slot.catId!)
+  return (
+    <div
+      className="flex w-40 flex-col items-center gap-2 rounded-lg border-2 bg-zinc-800 p-3 text-center"
+      style={{ borderColor: RARITY_COLORS[def.rarity] }}
+    >
+      <span className="text-3xl">{def.icon}</span>
+      <span className="text-sm font-bold">{def.name}</span>
+      <span className="text-[11px] uppercase tracking-wide" style={{ color: RARITY_COLORS[def.rarity] }}>
+        {RARITY_LABELS[def.rarity]}
+      </span>
+      <span className="text-xs leading-tight text-zinc-400">{def.description}</span>
+      <button
+        type="button"
+        onClick={onBuy}
+        disabled={!affordable}
+        className="mt-1 w-full rounded bg-yellow-500 px-2 py-1 text-sm font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-yellow-400"
+      >
+        Buy ${slot.cost}
+      </button>
+    </div>
+  )
+}
+
+function PackSlotCard({ slot, affordable, onBuy }: { slot: ShopSlot; affordable: boolean; onBuy: () => void }) {
+  const info = PACK_INFO[slot.packCategory!]
+  return (
+    <div className="flex w-40 flex-col items-center gap-2 rounded-lg border-2 border-indigo-400 bg-zinc-800 p-3 text-center">
+      <span className="text-3xl">{info.icon}</span>
+      <span className="text-sm font-bold">{info.label}</span>
+      <span className="text-xs leading-tight text-zinc-400">{info.description}</span>
+      <button
+        type="button"
+        onClick={onBuy}
+        disabled={!affordable}
+        className="mt-1 w-full rounded bg-indigo-400 px-2 py-1 text-sm font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-indigo-300"
+      >
+        Open ${slot.cost}
+      </button>
+    </div>
+  )
+}
 
 export function ShopScreen() {
   const run = useGameStore((s) => s.run)
@@ -12,46 +57,44 @@ export function ShopScreen() {
   const leave = useGameStore((s) => s.leave)
 
   const cost = rerollCost(run.rerollsUsedThisShop)
-  const slotsFull = run.ownedCats.length >= MAX_CAT_SLOTS
+  const maxSlots = effectiveMaxCatSlots(run.bonusCatSlots)
+  const slotsFull = run.ownedCats.length >= maxSlots
+
+  const catSlots = run.shopOffers.filter((s) => s.kind === 'cat')
+  const packSlots = run.shopOffers.filter((s) => s.kind === 'pack')
 
   return (
     <div className="flex flex-col gap-6 rounded-lg bg-zinc-900 p-6">
       {run.message && <div className="text-center text-lg font-semibold text-green-400">{run.message}</div>}
       <div className="text-center text-2xl font-bold">The Shop</div>
       <div className="text-center text-sm text-zinc-400">
-        Cat slots: {run.ownedCats.length} / {MAX_CAT_SLOTS}
+        Cat slots: {run.ownedCats.length} / {maxSlots}
       </div>
 
-      <div className="flex flex-wrap justify-center gap-4">
-        {run.shopOffers.length === 0 && (
-          <div className="text-sm text-zinc-500 italic">Sold out — leave or come back next time.</div>
-        )}
-        {run.shopOffers.map((defId) => {
-          const def = catDef(defId)
-          const affordable = run.money >= def.cost && !slotsFull
-          return (
-            <div
-              key={defId}
-              className="flex w-40 flex-col items-center gap-2 rounded-lg border-2 bg-zinc-800 p-3 text-center"
-              style={{ borderColor: RARITY_COLORS[def.rarity] }}
-            >
-              <span className="text-3xl">{def.icon}</span>
-              <span className="text-sm font-bold">{def.name}</span>
-              <span className="text-[11px] uppercase tracking-wide" style={{ color: RARITY_COLORS[def.rarity] }}>
-                {RARITY_LABELS[def.rarity]}
-              </span>
-              <span className="text-xs leading-tight text-zinc-400">{def.description}</span>
-              <button
-                type="button"
-                onClick={() => buy(defId)}
-                disabled={!affordable}
-                className="mt-1 w-full rounded bg-yellow-500 px-2 py-1 text-sm font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-yellow-400"
-              >
-                Buy ${def.cost}
-              </button>
-            </div>
-          )
-        })}
+      <div>
+        <div className="mb-2 text-sm font-semibold text-zinc-300">Cat Capsule &amp; Rare Cat Banners</div>
+        <div className="flex flex-wrap justify-center gap-4">
+          {catSlots.length === 0 && (
+            <div className="text-sm text-zinc-500 italic">Sold out — leave or reroll.</div>
+          )}
+          {catSlots.map((slot) => (
+            <CatSlotCard
+              key={slot.id}
+              slot={slot}
+              affordable={run.money >= slot.cost && !slotsFull}
+              onBuy={() => buy(slot.id)}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm font-semibold text-zinc-300">Packs</div>
+        <div className="flex flex-wrap justify-center gap-4">
+          {packSlots.map((slot) => (
+            <PackSlotCard key={slot.id} slot={slot} affordable={run.money >= slot.cost} onBuy={() => buy(slot.id)} />
+          ))}
+        </div>
       </div>
 
       <div className="flex justify-center gap-3">

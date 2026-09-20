@@ -48,4 +48,41 @@ describe('computeScore', () => {
     // base four_of_a_kind: 60 chips, 7 mult -> titan cat: mult *= 1.5
     expect(result.mult).toBe(7 * 1.5)
   })
+
+  it('zeroes chips and cat triggers for cards of a boss-banned suit', () => {
+    const hand = [c(7, 'hearts'), c(7, 'spades'), c(2, 'clubs')]
+    const result = computeScore(hand, [owned('bird_cat')], { ...baseOptions, bannedSuit: 'spades' })
+    // pair of 7s: base 10 chips, but the spade 7 contributes 0 chips and no Bird Cat (+3/spade) trigger
+    expect(result.chips).toBe(10 + 7)
+    expect(result.mult).toBe(2)
+  })
+
+  it('uses leveled-up hand base values when handLevels is provided', () => {
+    const hand = [c(4, 'hearts'), c(4, 'clubs'), c(2, 'spades')]
+    const base = computeScore(hand, [], baseOptions)
+    const leveled = computeScore(hand, [], {
+      ...baseOptions,
+      handLevels: { ...defaultLevels(), pair: 3 },
+    })
+    // pair levelChips=15, levelMult=1 per level above 1; level 3 = +2 levels
+    expect(leveled.chips).toBe(base.chips + 15 * 2)
+    expect(leveled.mult).toBe(base.mult + 1 * 2)
+  })
 })
+
+function defaultLevels() {
+  return {
+    high_card: 1,
+    pair: 1,
+    two_pair: 1,
+    three_of_a_kind: 1,
+    straight: 1,
+    flush: 1,
+    full_house: 1,
+    four_of_a_kind: 1,
+    straight_flush: 1,
+    five_of_a_kind: 1,
+    flush_house: 1,
+    flush_five: 1,
+  }
+}

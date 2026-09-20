@@ -1,7 +1,7 @@
-import type { Card } from './cards'
+import type { Card, Suit } from './cards'
 import { cardChipValue } from './cards'
 import { evaluateHand } from './handEvaluator'
-import { handTypeDef } from '../data/handTypes'
+import { defaultHandLevels, handTypeAtLevel, type HandTypeId } from '../data/handTypes'
 import { catDef } from './cats/roster'
 import type { BlindKind, OwnedCat, ScoringState } from './cats/types'
 
@@ -19,6 +19,8 @@ export interface ScoreOptions {
   ante: number
   blind: BlindKind
   catsDisabled: boolean
+  handLevels?: Record<HandTypeId, number>
+  bannedSuit?: Suit | null
 }
 
 export function computeScore(
@@ -27,10 +29,13 @@ export function computeScore(
   options: ScoreOptions,
 ): ScoreResult {
   const { handType, scoringCards } = evaluateHand(playedCards)
-  const base = handTypeDef(handType)
+  const levels = options.handLevels ?? defaultHandLevels()
+  const base = handTypeAtLevel(handType, levels[handType] ?? 1)
 
-  const state: ScoringState = { chips: base.baseChips, mult: base.baseMult }
+  const state: ScoringState = { chips: base.chips, mult: base.mult }
+  const bannedSuit = options.bannedSuit ?? null
   for (const card of scoringCards) {
+    if (card.suit === bannedSuit) continue
     state.chips += cardChipValue(card.rank)
   }
 
@@ -53,6 +58,7 @@ export function computeScore(
     }
 
     for (const card of scoringCards) {
+      if (card.suit === bannedSuit) continue
       for (const owned of activeCats) {
         catDef(owned.defId).effects.onCardScored?.(state, { ...handCtx, card })
       }

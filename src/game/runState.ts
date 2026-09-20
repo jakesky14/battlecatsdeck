@@ -1,8 +1,9 @@
-import type { Card } from './cards'
+import type { Card, Suit } from './cards'
 import { createDeck, shuffle } from './cards'
 import type { BlindKind, OwnedCat } from './cats/types'
 import { catDef } from './cats/roster'
 import { computeScore, type ScoreResult } from './scoring'
+import { defaultHandLevels, type HandTypeId } from '../data/handTypes'
 import {
   BLIND_REWARD,
   MAX_ANTE,
@@ -11,7 +12,8 @@ import {
   interestEarned,
   targetScore,
 } from './blinds'
-import { MAX_CAT_SLOTS, SHOP_SIZE, generateShopOffers, rerollCost } from './shop'
+import { generateShopSlots, rerollCost, type ShopSlot } from './shop'
+import { effectiveMaxCatSlots, openPack } from './packs'
 
 export const HAND_SIZE = 8
 export const STARTING_HANDS = 4
@@ -37,10 +39,18 @@ export interface RunState {
   roundScore: number
   target: number
   catsDisabledThisRound: boolean
+  bannedSuitThisRound: Suit | null
+  moneyDrainThisRound: boolean
+  roundHandSize: number
   lastResult: ScoreResult | null
-  shopOffers: string[]
+  shopOffers: ShopSlot[]
   rerollsUsedThisShop: number
   message: string | null
+  handLevels: Record<HandTypeId, number>
+  bonusHandsPerRound: number
+  bonusDiscardsPerRound: number
+  bonusCatSlots: number
+  removedCardIds: string[]
 }
 
 export function createInitialRunState(): RunState {
@@ -61,10 +71,18 @@ export function createInitialRunState(): RunState {
     roundScore: 0,
     target: targetScore(1, 'small'),
     catsDisabledThisRound: false,
+    bannedSuitThisRound: null,
+    moneyDrainThisRound: false,
+    roundHandSize: HAND_SIZE,
     lastResult: null,
     shopOffers: [],
     rerollsUsedThisShop: 0,
     message: null,
+    handLevels: defaultHandLevels(),
+    bonusHandsPerRound: 0,
+    bonusDiscardsPerRound: 0,
+    bonusCatSlots: 0,
+    removedCardIds: [],
   }
 }
 
@@ -74,24 +92,24 @@ function drawUpTo(hand: Card[], drawPile: Card[], size: number): { hand: Card[];
   return { hand: [...hand, ...drawn], drawPile: drawPile.slice(needed) }
 }
 
-function removeFirst(arr: string[], value: string): string[] {
-  const idx = arr.indexOf(value)
-  if (idx === -1) return arr
-  const copy = [...arr]
-  copy.splice(idx, 1)
-  return copy
-}
-
 export function startRound(state: RunState): RunState {
   if (state.phase !== 'blind-select') return state
   const boss = state.blind === 'boss' ? bossBlindForAnte(state.ante) : null
-  const shuffled = shuffle(createDeck())
-  const hand = shuffled.slice(0, HAND_SIZE)
-  const drawPile = shuffled.slice(HAND_SIZE)
-  const handsRemaining = Math.max(1, STARTING_HANDS - (boss?.effect === 'reduced_hands' ? 1 : 0))
+
+  const removed = new Set(state.removedCardIds)
+  const shuffled = shuffle(createDeck().filter((c) => !removed.has(c.id)))
+
+  const roundHandSize = Math.max(1, HAND_SIZE - (boss?.effect === 'reduced_hand_size' ? 2 : 0))
+  const hand = shuffled.slice(0, roundHandSize)
+  const drawPile = shuffled.slice(roundHandSize)
+
+  const handsReduction = boss?.effect === 'reduced_hands' || boss?.effect === 'gauntlet' ? 1 : 0
+  const handsRemaining = Math.max(1, STARTING_HANDS + state.bonusHandsPerRound - handsReduction)
+
+  const discardsReduction = boss?.effect === 'reduced_discards' ? 1 : 0
   const discardsRemaining = Math.max(
     0,
-    STARTING_DISCARDS - (boss?.effect === 'reduced_discards' ? 1 : 0),
+    STARTING_DISCARDS + state.bonusDiscardsPerRound - discardsReduction,
   )
 
   return {
@@ -107,7 +125,10 @@ export function startRound(state: RunState): RunState {
     discardsUsedThisRound: 0,
     roundScore: 0,
     target: targetScore(state.ante, state.blind),
+    roundHandSize,
     catsDisabledThisRound: boss?.effect === 'disable_cats',
+    bannedSuitThisRound: boss?.effect === 'ban_suit' ? boss.bannedSuit ?? null : null,
+    moneyDrainThisRound: boss?.effect === 'money_drain',
     lastResult: null,
     message: null,
   }
@@ -141,10 +162,7 @@ function winRound(state: RunState): RunState {
     blind = 'small'
   }
 
-  const offers = generateShopOffers(
-    SHOP_SIZE,
-    ownedCats.map((c) => c.defId),
-  )
+  const shopOffers = generateShopSlots(ownedCats.map((c) => c.defId))
 
   return {
     ...state,
@@ -153,7 +171,7 @@ function winRound(state: RunState): RunState {
     ownedCats,
     ante,
     blind,
-    shopOffers: offers.map((o) => o.id),
+    shopOffers,
     rerollsUsedThisShop: 0,
     message: `Round won! +$${reward}`,
   }
@@ -173,13 +191,16 @@ export function playHand(state: RunState): RunState {
     ante: state.ante,
     blind: state.blind,
     catsDisabled: state.catsDisabledThisRound,
+    handLevels: state.handLevels,
+    bannedSuit: state.bannedSuitThisRound,
   })
 
   const roundScore = state.roundScore + result.total
   const handsRemaining = state.handsRemaining - 1
   const handsPlayedThisRound = state.handsPlayedThisRound + 1
-  const { hand, drawPile } = drawUpTo(remainingHand, state.drawPile, HAND_SIZE)
+  const { hand, drawPile } = drawUpTo(remainingHand, state.drawPile, state.roundHandSize)
   const discardPile = [...state.discardPile, ...playedCards]
+  const money = state.moneyDrainThisRound ? Math.max(0, state.money - 1) : state.money
 
   const won = roundScore >= state.target
   const lost = !won && handsRemaining <= 0
@@ -193,6 +214,7 @@ export function playHand(state: RunState): RunState {
     roundScore,
     handsRemaining,
     handsPlayedThisRound,
+    money,
     lastResult: result,
   }
 
@@ -208,7 +230,7 @@ export function discardSelected(state: RunState): RunState {
   }
   const discarded = state.hand.filter((c) => state.selectedIds.includes(c.id))
   const remainingHand = state.hand.filter((c) => !state.selectedIds.includes(c.id))
-  const { hand, drawPile } = drawUpTo(remainingHand, state.drawPile, HAND_SIZE)
+  const { hand, drawPile } = drawUpTo(remainingHand, state.drawPile, state.roundHandSize)
 
   return {
     ...state,
@@ -228,24 +250,39 @@ export function skipBlind(state: RunState): RunState {
   return { ...state, money, blind, target: targetScore(state.ante, blind) }
 }
 
-export function buyCat(state: RunState, defId: string): RunState {
+export function buyShopSlot(state: RunState, slotId: string): RunState {
   if (state.phase !== 'shop') return state
-  if (state.ownedCats.length >= MAX_CAT_SLOTS) return state
-  if (!state.shopOffers.includes(defId)) return state
-  const def = catDef(defId)
-  if (state.money < def.cost) return state
+  const slot = state.shopOffers.find((s) => s.id === slotId)
+  if (!slot) return state
+  if (state.money < slot.cost) return state
 
-  const instance: OwnedCat = {
-    instanceId: `${defId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    defId,
-    disabledThisRound: false,
+  if (slot.kind === 'cat') {
+    if (!slot.catId) return state
+    if (state.ownedCats.length >= effectiveMaxCatSlots(state.bonusCatSlots)) return state
+
+    const instance: OwnedCat = {
+      instanceId: `${slot.catId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      defId: slot.catId,
+      disabledThisRound: false,
+    }
+
+    return {
+      ...state,
+      money: state.money - slot.cost,
+      ownedCats: [...state.ownedCats, instance],
+      shopOffers: state.shopOffers.filter((s) => s.id !== slotId),
+      message: null,
+    }
   }
 
+  if (!slot.packCategory) return state
+  const afterPurchase = { ...state, money: state.money - slot.cost }
+  const { state: nextState, message } = openPack(slot.packCategory, afterPurchase)
+
   return {
-    ...state,
-    money: state.money - def.cost,
-    ownedCats: [...state.ownedCats, instance],
-    shopOffers: removeFirst(state.shopOffers, defId),
+    ...nextState,
+    shopOffers: nextState.shopOffers.filter((s) => s.id !== slotId),
+    message,
   }
 }
 
@@ -265,15 +302,12 @@ export function rerollShop(state: RunState): RunState {
   const cost = rerollCost(state.rerollsUsedThisShop)
   if (state.money < cost) return state
 
-  const offers = generateShopOffers(
-    SHOP_SIZE,
-    state.ownedCats.map((c) => c.defId),
-  )
+  const shopOffers = generateShopSlots(state.ownedCats.map((c) => c.defId))
 
   return {
     ...state,
     money: state.money - cost,
-    shopOffers: offers.map((o) => o.id),
+    shopOffers,
     rerollsUsedThisShop: state.rerollsUsedThisShop + 1,
   }
 }

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import {
-  buyCat,
+  buyShopSlot,
   createInitialRunState,
   discardSelected,
   leaveShop,
@@ -22,7 +22,7 @@ interface GameStore {
   toggleCard: (cardId: string) => void
   play: () => void
   discard: () => void
-  buy: (defId: string) => void
+  buy: (slotId: string) => void
   sell: (instanceId: string) => void
   reroll: () => void
   leave: () => void
@@ -38,11 +38,11 @@ export const useGameStore = create<GameStore>()(
       toggleCard: (cardId) => set((s) => ({ run: toggleSelect(s.run, cardId) })),
       play: () => set((s) => ({ run: playHand(s.run) })),
       discard: () => set((s) => ({ run: discardSelected(s.run) })),
-      buy: (defId) => set((s) => ({ run: buyCat(s.run, defId) })),
+      buy: (slotId) => set((s) => ({ run: buyShopSlot(s.run, slotId) })),
       sell: (instanceId) => set((s) => ({ run: sellCat(s.run, instanceId) })),
       reroll: () => set((s) => ({ run: rerollShop(s.run) })),
       leave: () => set((s) => ({ run: leaveShop(s.run) })),
     }),
-    { name: 'battlecatsdeck-run' },
+    { name: 'battlecatsdeck-run-v2' },
   ),
 )

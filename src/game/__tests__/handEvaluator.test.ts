@@ -83,4 +83,26 @@ describe('evaluateHand', () => {
     const hand = [c(9, 'hearts'), c(9, 'clubs'), c(9, 'spades'), c(9, 'diamonds'), c(4, 'hearts')]
     expect(evaluateHand(hand).handType).toBe('four_of_a_kind')
   })
+
+  // These hand types need duplicate rank/suit cards a standard 52-card deck
+  // can't deal on its own (only reachable via future card-duplication effects),
+  // but the evaluator should still recognize them correctly when it happens.
+  it('detects five of a kind (duplicate ranks required)', () => {
+    const hand = [c(9, 'hearts'), c(9, 'clubs'), c(9, 'spades'), c(9, 'diamonds'), c(9, 'hearts')]
+    const result = evaluateHand(hand)
+    expect(result.handType).toBe('five_of_a_kind')
+    expect(result.scoringCards).toHaveLength(5)
+  })
+
+  it('detects flush house (full house all one suit)', () => {
+    const hand = [c(9, 'hearts'), c(9, 'hearts'), c(9, 'hearts'), c(4, 'hearts'), c(4, 'hearts')]
+    const result = evaluateHand(hand)
+    expect(result.handType).toBe('flush_house')
+  })
+
+  it('detects flush five (five of a kind all one suit)', () => {
+    const hand = [c(9, 'hearts'), c(9, 'hearts'), c(9, 'hearts'), c(9, 'hearts'), c(9, 'hearts')]
+    const result = evaluateHand(hand)
+    expect(result.handType).toBe('flush_five')
+  })
 })

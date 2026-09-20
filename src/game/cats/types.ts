@@ -1,7 +1,7 @@
 import type { Card } from '../cards'
 import type { HandTypeId } from '../../data/handTypes'
 
-export type Rarity = 'common' | 'uncommon' | 'rare' | 'uber'
+export type Rarity = 'common' | 'uncommon' | 'rare' | 'super_rare' | 'uber'
 
 export type BlindKind = 'small' | 'big' | 'boss'
 
@@ -59,12 +59,13 @@ export interface OwnedCat {
   disabledThisRound: boolean
 }
 
-export const RARITY_ORDER: Rarity[] = ['common', 'uncommon', 'rare', 'uber']
+export const RARITY_ORDER: Rarity[] = ['common', 'uncommon', 'rare', 'super_rare', 'uber']
 
 export const RARITY_COLORS: Record<Rarity, string> = {
   common: '#9ca3af',
   uncommon: '#4ade80',
   rare: '#60a5fa',
+  super_rare: '#f97316',
   uber: '#c084fc',
 }
 
@@ -72,5 +73,9 @@ export const RARITY_LABELS: Record<Rarity, string> = {
   common: 'Normal',
   uncommon: 'Special',
   rare: 'Rare',
+  super_rare: 'Super Rare',
   uber: 'Uber Rare',
 }
+
+/** Rarity tiers pulled from the Rare Cat Banner shop slots (excludes Normal/Special). */
+export const BANNER_RARITIES: Rarity[] = ['rare', 'super_rare', 'uber']

@@ -56,6 +56,17 @@ export function evaluateHand(cards: Card[]): EvaluatedHand {
   const flush = isFlush(cards)
   const straight = isStraight(cards)
 
+  // These require duplicate ranks/suits beyond what a standard 52-card deck
+  // can deal on its own — reachable once cards can be duplicated/enhanced.
+  if (flush && groups[0].count === 5) {
+    return { handType: 'flush_five', scoringCards: cards }
+  }
+  if (flush && groups[0].count === 3 && groups[1]?.count === 2) {
+    return { handType: 'flush_house', scoringCards: cards }
+  }
+  if (groups[0].count === 5) {
+    return { handType: 'five_of_a_kind', scoringCards: cards }
+  }
   if (flush && straight) {
     return { handType: 'straight_flush', scoringCards: cards }
   }
