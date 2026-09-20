@@ -1,0 +1,81 @@
+import { CatRow } from './CatRow'
+import { catDef } from '../game/cats/roster'
+import { RARITY_COLORS, RARITY_LABELS } from '../game/cats/types'
+import { MAX_CAT_SLOTS, rerollCost } from '../game/shop'
+import { useGameStore } from '../state/useGameStore'
+
+export function ShopScreen() {
+  const run = useGameStore((s) => s.run)
+  const buy = useGameStore((s) => s.buy)
+  const sell = useGameStore((s) => s.sell)
+  const reroll = useGameStore((s) => s.reroll)
+  const leave = useGameStore((s) => s.leave)
+
+  const cost = rerollCost(run.rerollsUsedThisShop)
+  const slotsFull = run.ownedCats.length >= MAX_CAT_SLOTS
+
+  return (
+    <div className="flex flex-col gap-6 rounded-lg bg-zinc-900 p-6">
+      {run.message && <div className="text-center text-lg font-semibold text-green-400">{run.message}</div>}
+      <div className="text-center text-2xl font-bold">The Shop</div>
+      <div className="text-center text-sm text-zinc-400">
+        Cat slots: {run.ownedCats.length} / {MAX_CAT_SLOTS}
+      </div>
+
+      <div className="flex flex-wrap justify-center gap-4">
+        {run.shopOffers.length === 0 && (
+          <div className="text-sm text-zinc-500 italic">Sold out — leave or come back next time.</div>
+        )}
+        {run.shopOffers.map((defId) => {
+          const def = catDef(defId)
+          const affordable = run.money >= def.cost && !slotsFull
+          return (
+            <div
+              key={defId}
+              className="flex w-40 flex-col items-center gap-2 rounded-lg border-2 bg-zinc-800 p-3 text-center"
+              style={{ borderColor: RARITY_COLORS[def.rarity] }}
+            >
+              <span className="text-3xl">{def.icon}</span>
+              <span className="text-sm font-bold">{def.name}</span>
+              <span className="text-[11px] uppercase tracking-wide" style={{ color: RARITY_COLORS[def.rarity] }}>
+                {RARITY_LABELS[def.rarity]}
+              </span>
+              <span className="text-xs leading-tight text-zinc-400">{def.description}</span>
+              <button
+                type="button"
+                onClick={() => buy(defId)}
+                disabled={!affordable}
+                className="mt-1 w-full rounded bg-yellow-500 px-2 py-1 text-sm font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-yellow-400"
+              >
+                Buy ${def.cost}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="flex justify-center gap-3">
+        <button
+          type="button"
+          onClick={reroll}
+          disabled={run.money < cost}
+          className="rounded-lg bg-zinc-700 px-4 py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-zinc-600"
+        >
+          Reroll (${cost})
+        </button>
+        <button
+          type="button"
+          onClick={leave}
+          className="rounded-lg bg-yellow-500 px-4 py-2 font-semibold text-zinc-900 hover:bg-yellow-400"
+        >
+          Next Blind
+        </button>
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm font-semibold text-zinc-300">Your Cats (click to sell)</div>
+        <CatRow ownedCats={run.ownedCats} onSell={sell} />
+      </div>
+    </div>
+  )
+}
