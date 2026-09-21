@@ -1,5 +1,6 @@
 import { CatRow } from './CatRow'
-import { blindLabel, bossBlindForAnte } from '../game/blinds'
+import { EnemyPanel } from './EnemyPanel'
+import { blindLabel, getEnemyForBlind } from '../game/blinds'
 import { useGameStore } from '../state/useGameStore'
 
 export function BlindSelectScreen() {
@@ -7,17 +8,17 @@ export function BlindSelectScreen() {
   const playBlind = useGameStore((s) => s.playBlind)
   const skip = useGameStore((s) => s.skip)
 
-  const boss = run.blind === 'boss' ? bossBlindForAnte(run.ante) : null
+  const enemy = getEnemyForBlind(run.ante, run.blind)
 
   return (
     <div className="flex flex-col items-center gap-6 rounded-lg bg-zinc-900 p-8 text-center">
       {run.message && <div className="text-lg font-semibold text-green-400">{run.message}</div>}
       <div>
         <div className="text-sm text-zinc-400">Ante {run.ante}</div>
-        <div className="text-3xl font-bold">{blindLabel(run.blind, run.ante)}</div>
-        <div className="mt-2 text-xl text-yellow-400">Target: {run.target}</div>
-        {boss && <div className="mt-2 max-w-sm text-sm text-red-300">{boss.description}</div>}
+        <div className="text-lg text-zinc-400">{blindLabel(run.blind, run.ante)}</div>
       </div>
+
+      <EnemyPanel enemy={enemy} maxHp={run.target} currentHp={run.target} />
 
       <div className="flex gap-3">
         <button
@@ -25,7 +26,7 @@ export function BlindSelectScreen() {
           onClick={playBlind}
           className="rounded-lg bg-yellow-500 px-6 py-2 font-semibold text-zinc-900 hover:bg-yellow-400"
         >
-          Play
+          Fight
         </button>
         {run.blind !== 'boss' && (
           <button

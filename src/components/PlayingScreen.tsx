@@ -1,6 +1,7 @@
 import { Card } from './Card'
 import { CatRow } from './CatRow'
-import { bossBlindForAnte } from '../game/blinds'
+import { EnemyPanel } from './EnemyPanel'
+import { getEnemyForBlind } from '../game/blinds'
 import { suitSymbol } from '../game/cards'
 import { evaluateHand } from '../game/handEvaluator'
 import { handTypeAtLevel, handTypeDef } from '../data/handTypes'
@@ -18,40 +19,29 @@ export function PlayingScreen() {
   const previewLevel = preview ? run.handLevels[preview.handType] ?? 1 : 1
   const previewAtLevel = preview ? handTypeAtLevel(preview.handType, previewLevel) : null
 
-  const remaining = run.target - run.roundScore
-  const boss = run.blind === 'boss' ? bossBlindForAnte(run.ante) : null
+  const enemy = getEnemyForBlind(run.ante, run.blind)
+  const currentHp = run.target - run.roundScore
 
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-lg bg-zinc-900 p-4">
-        <div className="flex items-center justify-between">
+        <EnemyPanel enemy={enemy} maxHp={run.target} currentHp={currentHp} />
+
+        <div className="mt-4 flex justify-center gap-6 text-center">
           <div>
-            <div className="text-sm text-zinc-400">Score</div>
-            <div className="text-2xl font-bold">
-              {run.roundScore} <span className="text-zinc-500">/ {run.target}</span>
-            </div>
-            {remaining > 0 && <div className="text-xs text-zinc-500">{remaining} to go</div>}
+            <div className="text-sm text-zinc-400">Hands</div>
+            <div className="text-xl font-bold">{run.handsRemaining}</div>
           </div>
-          <div className="flex gap-6 text-center">
-            <div>
-              <div className="text-sm text-zinc-400">Hands</div>
-              <div className="text-xl font-bold">{run.handsRemaining}</div>
-            </div>
-            <div>
-              <div className="text-sm text-zinc-400">Discards</div>
-              <div className="text-xl font-bold">{run.discardsRemaining}</div>
-            </div>
+          <div>
+            <div className="text-sm text-zinc-400">Discards</div>
+            <div className="text-xl font-bold">{run.discardsRemaining}</div>
           </div>
         </div>
-        {boss && (
-          <div className="mt-2 rounded bg-red-950 px-2 py-1 text-xs text-red-300">
-            {boss.name}: {boss.description}
-          </div>
-        )}
+
         {run.lastResult && (
-          <div className="mt-2 text-sm text-zinc-400">
-            Last play: {handTypeDef(run.lastResult.handType).label} — {run.lastResult.chips} chips ×{' '}
-            {run.lastResult.mult} mult = {run.lastResult.total}
+          <div className="mt-2 text-center text-sm text-zinc-400">
+            {handTypeDef(run.lastResult.handType).label} — {run.lastResult.chips} chips ×{' '}
+            {run.lastResult.mult} mult = <span className="font-semibold text-red-400">{run.lastResult.total} damage</span>
           </div>
         )}
       </div>
@@ -79,7 +69,7 @@ export function PlayingScreen() {
         </div>
         {run.bannedSuitThisRound && (
           <div className="text-xs text-red-400">
-            {suitSymbol(run.bannedSuitThisRound)} cards score 0 Chips this round
+            {suitSymbol(run.bannedSuitThisRound)} cards deal 0 Chips of damage this round
           </div>
         )}
         <div className="flex gap-3">
@@ -97,7 +87,7 @@ export function PlayingScreen() {
             disabled={run.selectedIds.length === 0 || run.handsRemaining <= 0}
             className="rounded-lg bg-yellow-500 px-4 py-2 font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-yellow-400"
           >
-            Play Hand
+            Attack
           </button>
         </div>
       </div>

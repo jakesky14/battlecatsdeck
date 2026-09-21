@@ -14,6 +14,7 @@ export type BossEffectId =
 export interface BossBlindDef {
   id: string
   name: string
+  icon: string
   description: string
   effect: BossEffectId
   bannedSuit?: Suit
@@ -24,53 +25,95 @@ export const BOSS_BLINDS: BossBlindDef[] = [
   {
     id: 'doge',
     name: 'Doge',
+    icon: '🐕',
     description: "Doge's stare disables all Cat abilities this round.",
     effect: 'disable_cats',
   },
   {
     id: 'snache',
     name: 'Snache',
+    icon: '🦎',
     description: 'Snache jams your discards — one fewer discard this round.',
     effect: 'reduced_discards',
   },
   {
     id: 'those_guys',
     name: 'Those Guys',
-    description: 'Those Guys swarm the field — target score up 25%.',
+    icon: '👥',
+    description: 'Those Guys swarm the field — max HP up 25%.',
     effect: 'extra_target',
   },
   {
     id: 'teacher_bear',
     name: 'Teacher Bear',
+    icon: '🐻',
     description: 'Teacher Bear docks you one hand to play this round.',
     effect: 'reduced_hands',
   },
   {
     id: 'one_horn',
     name: 'One Horn',
+    icon: '🦏',
     description: 'One Horn charges through your hand — 2 fewer cards dealt this round.',
     effect: 'reduced_hand_size',
   },
   {
     id: 'the_face',
     name: 'The Face',
-    description: "The Face's stare blanks every ♠ Spade — they score 0 Chips this round.",
+    icon: '👁️',
+    description: "The Face's stare blanks every ♠ Spade — they deal 0 Chips of damage this round.",
     effect: 'ban_suit',
     bannedSuit: 'spades',
   },
   {
     id: 'dark_emperor_nyandam',
     name: 'Dark Emperor Nyandam',
+    icon: '😈',
     description: 'Dark Emperor Nyandam drains $1 from you every hand you play this round.',
     effect: 'money_drain',
   },
   {
     id: 'teacher_bun_bun',
     name: 'Teacher Bun Bun',
-    description: 'Teacher Bun Bun brings the full gauntlet — target up 25% and one fewer hand.',
+    icon: '🐰',
+    description: 'Teacher Bun Bun brings the full gauntlet — max HP up 25% and one fewer hand.',
     effect: 'gauntlet',
   },
 ]
+
+/** Basic enemies fought at Small/Big Blinds — flavor only, no mechanical debuff. */
+export interface RegularEnemyDef {
+  id: string
+  name: string
+  icon: string
+}
+
+export const REGULAR_ENEMIES: RegularEnemyDef[] = [
+  { id: 'hippoe', name: 'Hippoe', icon: '🦛' },
+  { id: 'croco', name: 'Croco', icon: '🐊' },
+  { id: 'pigeon_de_sable', name: 'Pigeon de Sable', icon: '🐦' },
+  { id: 'sir_seal', name: 'Sir Seal', icon: '🦭' },
+  { id: 'shibalien', name: 'Shibalien', icon: '👽' },
+  { id: 'squire_rel', name: 'Squire Rel', icon: '🗡️' },
+]
+
+export interface EnemyIdentity {
+  id: string
+  name: string
+  icon: string
+  description?: string
+}
+
+/** Which enemy is fought for a given ante/blind. Deterministic — no RNG/state needed. */
+export function getEnemyForBlind(ante: number, blind: BlindKind): EnemyIdentity {
+  if (blind === 'boss') {
+    const boss = bossBlindForAnte(ante)
+    return { id: boss.id, name: boss.name, icon: boss.icon, description: boss.description }
+  }
+  const index = (ante - 1) * 2 + (blind === 'big' ? 1 : 0)
+  const enemy = REGULAR_ENEMIES[index % REGULAR_ENEMIES.length]
+  return { id: enemy.id, name: enemy.name, icon: enemy.icon }
+}
 
 export function bossBlindForAnte(ante: number): BossBlindDef {
   return BOSS_BLINDS[(ante - 1) % BOSS_BLINDS.length]
@@ -80,6 +123,7 @@ export function anteBaseScore(ante: number): number {
   return Math.round(100 * Math.pow(1.6, ante - 1))
 }
 
+/** Max HP of the enemy fought at this ante/blind. */
 export function targetScore(ante: number, blind: BlindKind): number {
   const base = anteBaseScore(ante)
   if (blind === 'small') return base
