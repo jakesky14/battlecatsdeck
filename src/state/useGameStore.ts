@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import {
   buyShopSlot,
+  chooseMode,
   createInitialRunState,
   discardSelected,
   leaveShop,
@@ -11,12 +12,14 @@ import {
   skipBlind,
   startRound,
   toggleSelect,
+  type GameMode,
   type RunState,
 } from '../game/runState'
 
 interface GameStore {
   run: RunState
   startNewRun: () => void
+  pickMode: (mode: GameMode) => void
   playBlind: () => void
   skip: () => void
   toggleCard: (cardId: string) => void
@@ -33,6 +36,7 @@ export const useGameStore = create<GameStore>()(
     (set) => ({
       run: createInitialRunState(),
       startNewRun: () => set({ run: createInitialRunState() }),
+      pickMode: (mode) => set((s) => ({ run: chooseMode(s.run, mode) })),
       playBlind: () => set((s) => ({ run: startRound(s.run) })),
       skip: () => set((s) => ({ run: skipBlind(s.run) })),
       toggleCard: (cardId) => set((s) => ({ run: toggleSelect(s.run, cardId) })),
@@ -43,6 +47,6 @@ export const useGameStore = create<GameStore>()(
       reroll: () => set((s) => ({ run: rerollShop(s.run) })),
       leave: () => set((s) => ({ run: leaveShop(s.run) })),
     }),
-    { name: 'battlecatsdeck-run-v2' },
+    { name: 'battlecatsdeck-run-v3' },
   ),
 )

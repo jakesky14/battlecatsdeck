@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  chooseMode,
   createInitialRunState,
   discardSelected,
   playHand,
@@ -12,9 +13,24 @@ function selectAll(state: RunState, ids: string[]): RunState {
   return ids.reduce((s, id) => toggleSelect(s, id), state)
 }
 
+/** A fresh run past mode-select, ready to start its first blind. */
+function readyState(): RunState {
+  return chooseMode(createInitialRunState(), 'enemy')
+}
+
 describe('run state machine', () => {
+  it('mode-select gates the run until a mode is chosen', () => {
+    const fresh = createInitialRunState()
+    expect(fresh.phase).toBe('mode-select')
+    expect(startRound(fresh).phase).toBe('mode-select') // can't start before choosing
+
+    const chosen = chooseMode(fresh, 'classic')
+    expect(chosen.phase).toBe('blind-select')
+    expect(chosen.mode).toBe('classic')
+  })
+
   it('starts a round with a full hand and default resources', () => {
-    const state = startRound(createInitialRunState())
+    const state = startRound(readyState())
     expect(state.phase).toBe('playing')
     expect(state.hand).toHaveLength(8)
     expect(state.handsRemaining).toBe(4)
@@ -22,7 +38,7 @@ describe('run state machine', () => {
   })
 
   it('discarding replaces selected cards and consumes a discard', () => {
-    let state = startRound(createInitialRunState())
+    let state = startRound(readyState())
     const toDiscard = state.hand.slice(0, 3).map((c) => c.id)
     state = selectAll(state, toDiscard)
     state = discardSelected(state)
@@ -33,7 +49,7 @@ describe('run state machine', () => {
   })
 
   it('winning a small blind round moves to the shop and awards money', () => {
-    let state = startRound(createInitialRunState())
+    let state = startRound(readyState())
     state = { ...state, target: 0 } // force an immediate win on first play
     const cardId = state.hand[0].id
     state = toggleSelect(state, cardId)
@@ -44,7 +60,7 @@ describe('run state machine', () => {
   })
 
   it('losing all hands without reaching target ends the run', () => {
-    let state = startRound(createInitialRunState())
+    let state = startRound(readyState())
     state = { ...state, target: 999999 }
     for (let i = 0; i < 4; i++) {
       const cardId = state.hand[0].id

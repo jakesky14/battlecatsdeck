@@ -1,7 +1,8 @@
 import { Card } from './Card'
 import { CatRow } from './CatRow'
+import { ClassicBlindPanel } from './ClassicBlindPanel'
 import { EnemyPanel } from './EnemyPanel'
-import { getEnemyForBlind } from '../game/blinds'
+import { bossBlindForAnte, getEnemyForBlind } from '../game/blinds'
 import { suitSymbol } from '../game/cards'
 import { evaluateHand } from '../game/handEvaluator'
 import { handTypeAtLevel, handTypeDef } from '../data/handTypes'
@@ -21,11 +22,23 @@ export function PlayingScreen() {
 
   const enemy = getEnemyForBlind(run.ante, run.blind)
   const currentHp = run.target - run.roundScore
+  const bossDescription = run.blind === 'boss' ? bossBlindForAnte(run.ante).description : undefined
+  const isEnemyMode = run.mode === 'enemy'
 
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-lg bg-zinc-900 p-4">
-        <EnemyPanel enemy={enemy} maxHp={run.target} currentHp={currentHp} />
+        {isEnemyMode ? (
+          <EnemyPanel enemy={enemy} maxHp={run.target} currentHp={currentHp} />
+        ) : (
+          <ClassicBlindPanel
+            blind={run.blind}
+            ante={run.ante}
+            target={run.target}
+            score={run.roundScore}
+            description={bossDescription}
+          />
+        )}
 
         <div className="mt-4 flex justify-center gap-6 text-center">
           <div>
@@ -41,7 +54,10 @@ export function PlayingScreen() {
         {run.lastResult && (
           <div className="mt-2 text-center text-sm text-zinc-400">
             {handTypeDef(run.lastResult.handType).label} — {run.lastResult.chips} chips ×{' '}
-            {run.lastResult.mult} mult = <span className="font-semibold text-red-400">{run.lastResult.total} damage</span>
+            {run.lastResult.mult} mult ={' '}
+            <span className="font-semibold text-red-400">
+              {run.lastResult.total} {isEnemyMode ? 'damage' : 'points'}
+            </span>
           </div>
         )}
       </div>
@@ -69,7 +85,7 @@ export function PlayingScreen() {
         </div>
         {run.bannedSuitThisRound && (
           <div className="text-xs text-red-400">
-            {suitSymbol(run.bannedSuitThisRound)} cards deal 0 Chips of damage this round
+            {suitSymbol(run.bannedSuitThisRound)} cards score 0 Chips this round
           </div>
         )}
         <div className="flex gap-3">
@@ -87,7 +103,7 @@ export function PlayingScreen() {
             disabled={run.selectedIds.length === 0 || run.handsRemaining <= 0}
             className="rounded-lg bg-yellow-500 px-4 py-2 font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-yellow-400"
           >
-            Attack
+            {isEnemyMode ? 'Attack' : 'Play Hand'}
           </button>
         </div>
       </div>

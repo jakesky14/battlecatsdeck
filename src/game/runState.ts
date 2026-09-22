@@ -20,10 +20,14 @@ export const STARTING_HANDS = 4
 export const STARTING_DISCARDS = 3
 export const STARTING_MONEY = 4
 
-export type Phase = 'blind-select' | 'playing' | 'shop' | 'game-over' | 'victory'
+export type Phase = 'mode-select' | 'blind-select' | 'playing' | 'shop' | 'game-over' | 'victory'
+
+/** 'enemy': blinds are enemies with HP. 'classic': blinds are a plain score target, like original Balatro. */
+export type GameMode = 'enemy' | 'classic'
 
 export interface RunState {
   phase: Phase
+  mode: GameMode
   ante: number
   blind: BlindKind
   money: number
@@ -55,7 +59,8 @@ export interface RunState {
 
 export function createInitialRunState(): RunState {
   return {
-    phase: 'blind-select',
+    phase: 'mode-select',
+    mode: 'enemy',
     ante: 1,
     blind: 'small',
     money: STARTING_MONEY,
@@ -84,6 +89,11 @@ export function createInitialRunState(): RunState {
     bonusCatSlots: 0,
     removedCardIds: [],
   }
+}
+
+export function chooseMode(state: RunState, mode: GameMode): RunState {
+  if (state.phase !== 'mode-select') return state
+  return { ...state, mode, phase: 'blind-select' }
 }
 
 function drawUpTo(hand: Card[], drawPile: Card[], size: number): { hand: Card[]; drawPile: Card[] } {
