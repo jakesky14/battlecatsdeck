@@ -12,12 +12,19 @@ function owned(defId: string, index = 0): OwnedCat {
 }
 
 describe('openPack', () => {
-  it('planet: levels up a hand type', () => {
+  it('planet: low roll levels up Pluto (High Card)', () => {
     const state = createInitialRunState()
     const { state: next, message } = openPack('planet', state, low)
-    const leveled = Object.entries(next.handLevels).find(([, lvl]) => lvl === 2)
-    expect(leveled).toBeDefined()
+    expect(next.handLevels.high_card).toBe(2)
+    expect(message).toContain('Pluto')
     expect(message).toContain('leveled up')
+  })
+
+  it('planet: high roll levels up Eris (Flush Five)', () => {
+    const state = createInitialRunState()
+    const { state: next, message } = openPack('planet', state, high)
+    expect(next.handLevels.flush_five).toBe(2)
+    expect(message).toContain('Eris')
   })
 
   it('tarot: low roll grants money, high roll removes a deck card', () => {

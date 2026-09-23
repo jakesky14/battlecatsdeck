@@ -83,7 +83,7 @@ export const HAND_TYPES: HandTypeDef[] = [
     baseChips: 160,
     baseMult: 16,
     levelChips: 50,
-    levelMult: 5,
+    levelMult: 3,
   },
 ]
 

@@ -2,6 +2,7 @@ import { createDeck, rankLabel, suitSymbol } from './cards'
 import { CAT_ROSTER, catDef } from './cats/roster'
 import { BANNER_RARITIES, type OwnedCat } from './cats/types'
 import { HAND_TYPES, handTypeDef } from '../data/handTypes'
+import { PLANET_CARDS } from '../data/planets'
 import { MAX_CAT_SLOTS } from './shop'
 import type { RunState } from './runState'
 
@@ -51,12 +52,12 @@ function pick<T>(items: T[], rng: () => number): T {
 }
 
 function applyPlanet(state: RunState, rng: () => number): PackResult {
-  const handType = pick(HAND_TYPES, rng).id
-  const newLevel = (state.handLevels[handType] ?? 1) + 1
-  const handLevels = { ...state.handLevels, [handType]: newLevel }
+  const planet = pick(PLANET_CARDS, rng)
+  const newLevel = (state.handLevels[planet.handType] ?? 1) + 1
+  const handLevels = { ...state.handLevels, [planet.handType]: newLevel }
   return {
     state: { ...state, handLevels },
-    message: `🪐 Planet Card: ${handTypeDef(handType).label} leveled up to Lv.${newLevel}!`,
+    message: `${planet.icon} ${planet.name}: ${handTypeDef(planet.handType).label} leveled up to Lv.${newLevel}!`,
   }
 }
 
