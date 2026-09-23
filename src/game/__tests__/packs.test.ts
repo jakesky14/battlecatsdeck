@@ -27,14 +27,10 @@ describe('openPack', () => {
     expect(message).toContain('Eris')
   })
 
-  it('tarot: low roll grants money, high roll removes a deck card', () => {
+  it('planet: records itself as the last consumable used, for The Fool', () => {
     const state = createInitialRunState()
-
-    const moneyResult = openPack('tarot', state, low)
-    expect(moneyResult.state.money).toBe(state.money + 8)
-
-    const removeResult = openPack('tarot', state, high)
-    expect(removeResult.state.removedCardIds).toHaveLength(1)
+    const { state: next } = openPack('planet', state, low)
+    expect(next.lastConsumableUsed).toEqual({ kind: 'planet', id: 'pluto' })
   })
 
   it('spectral: grants a free cat when no cats are owned yet', () => {

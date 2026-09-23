@@ -3,15 +3,18 @@ import { persist } from 'zustand/middleware'
 import {
   buyShopSlot,
   chooseMode,
+  clearSelection,
   createInitialRunState,
   discardSelected,
   leaveShop,
   playHand,
+  reorderHand,
   rerollShop,
   sellCat,
   skipBlind,
   startRound,
   toggleSelect,
+  useConsumable,
   type GameMode,
   type RunState,
 } from '../game/runState'
@@ -29,6 +32,9 @@ interface GameStore {
   sell: (instanceId: string) => void
   reroll: () => void
   leave: () => void
+  useCard: (instanceId: string, targetIds: string[]) => void
+  moveCard: (cardId: string, direction: 'left' | 'right') => void
+  clearCardSelection: () => void
 }
 
 export const useGameStore = create<GameStore>()(
@@ -46,7 +52,10 @@ export const useGameStore = create<GameStore>()(
       sell: (instanceId) => set((s) => ({ run: sellCat(s.run, instanceId) })),
       reroll: () => set((s) => ({ run: rerollShop(s.run) })),
       leave: () => set((s) => ({ run: leaveShop(s.run) })),
+      useCard: (instanceId, targetIds) => set((s) => ({ run: useConsumable(s.run, instanceId, targetIds) })),
+      moveCard: (cardId, direction) => set((s) => ({ run: reorderHand(s.run, cardId, direction) })),
+      clearCardSelection: () => set((s) => ({ run: clearSelection(s.run) })),
     }),
-    { name: 'battlecatsdeck-run-v3' },
+    { name: 'battlecatsdeck-run-v4' },
   ),
 )

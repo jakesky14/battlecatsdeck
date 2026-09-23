@@ -1,6 +1,8 @@
 import { CatRow } from './CatRow'
+import { ConsumablesPanel } from './ConsumablesPanel'
 import { catDef } from '../game/cats/roster'
 import { RARITY_COLORS, RARITY_LABELS } from '../game/cats/types'
+import { MAX_CONSUMABLE_SLOTS } from '../game/consumables'
 import { PACK_INFO, effectiveMaxCatSlots } from '../game/packs'
 import { rerollCost, type ShopSlot } from '../game/shop'
 import { useGameStore } from '../state/useGameStore'
@@ -55,13 +57,21 @@ export function ShopScreen() {
   const sell = useGameStore((s) => s.sell)
   const reroll = useGameStore((s) => s.reroll)
   const leave = useGameStore((s) => s.leave)
+  const useCard = useGameStore((s) => s.useCard)
 
   const cost = rerollCost(run.rerollsUsedThisShop)
   const maxSlots = effectiveMaxCatSlots(run.bonusCatSlots)
   const slotsFull = run.ownedCats.length >= maxSlots
+  const consumablesFull = run.consumables.length >= MAX_CONSUMABLE_SLOTS
 
   const catSlots = run.shopOffers.filter((s) => s.kind === 'cat')
   const packSlots = run.shopOffers.filter((s) => s.kind === 'pack')
+
+  function packAffordable(slot: ShopSlot): boolean {
+    if (run.money < slot.cost) return false
+    if (slot.packCategory === 'tarot' && consumablesFull) return false
+    return true
+  }
 
   return (
     <div className="flex flex-col gap-6 rounded-lg bg-zinc-900 p-6">
@@ -92,7 +102,7 @@ export function ShopScreen() {
         <div className="mb-2 text-sm font-semibold text-zinc-300">Packs</div>
         <div className="flex flex-wrap justify-center gap-4">
           {packSlots.map((slot) => (
-            <PackSlotCard key={slot.id} slot={slot} affordable={run.money >= slot.cost} onBuy={() => buy(slot.id)} />
+            <PackSlotCard key={slot.id} slot={slot} affordable={packAffordable(slot)} onBuy={() => buy(slot.id)} />
           ))}
         </div>
       </div>
@@ -118,6 +128,15 @@ export function ShopScreen() {
       <div>
         <div className="mb-2 text-sm font-semibold text-zinc-300">Your Cats (click to sell)</div>
         <CatRow ownedCats={run.ownedCats} onSell={sell} />
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm font-semibold text-zinc-300">Consumables</div>
+        <ConsumablesPanel
+          consumables={run.consumables}
+          phase={run.phase}
+          onUse={(instanceId) => useCard(instanceId, [])}
+        />
       </div>
     </div>
   )

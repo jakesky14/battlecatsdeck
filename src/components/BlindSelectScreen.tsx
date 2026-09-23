@@ -1,5 +1,6 @@
 import { CatRow } from './CatRow'
 import { ClassicBlindPanel } from './ClassicBlindPanel'
+import { ConsumablesPanel } from './ConsumablesPanel'
 import { EnemyPanel } from './EnemyPanel'
 import { bossBlindForAnte, getEnemyForBlind } from '../game/blinds'
 import { useGameStore } from '../state/useGameStore'
@@ -8,6 +9,7 @@ export function BlindSelectScreen() {
   const run = useGameStore((s) => s.run)
   const playBlind = useGameStore((s) => s.playBlind)
   const skip = useGameStore((s) => s.skip)
+  const useCard = useGameStore((s) => s.useCard)
 
   const enemy = getEnemyForBlind(run.ante, run.blind)
   const bossDescription = run.blind === 'boss' ? bossBlindForAnte(run.ante).description : undefined
@@ -51,6 +53,15 @@ export function BlindSelectScreen() {
       <div className="w-full">
         <div className="mb-2 text-sm font-semibold text-zinc-300">Your Cats</div>
         <CatRow ownedCats={run.ownedCats} />
+      </div>
+
+      <div className="w-full">
+        <div className="mb-2 text-sm font-semibold text-zinc-300">Consumables</div>
+        <ConsumablesPanel
+          consumables={run.consumables}
+          phase={run.phase}
+          onUse={(instanceId) => useCard(instanceId, [])}
+        />
       </div>
     </div>
   )

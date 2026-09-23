@@ -4,6 +4,7 @@ import type { BlindKind, OwnedCat } from './cats/types'
 import { catDef } from './cats/roster'
 import { computeScore, type ScoreResult } from './scoring'
 import { defaultHandLevels, type HandTypeId } from '../data/handTypes'
+import { TAROT_CARDS, type TarotId } from '../data/tarots'
 import {
   BLIND_REWARD,
   MAX_ANTE,
@@ -14,6 +15,9 @@ import {
 } from './blinds'
 import { generateShopSlots, rerollCost, type ShopSlot } from './shop'
 import { effectiveMaxCatSlots, openPack } from './packs'
+import { applyTarot } from './tarot'
+import { MAX_CONSUMABLE_SLOTS, type ConsumableItem } from './consumables'
+import { pick } from './rng'
 
 export const HAND_SIZE = 8
 export const STARTING_HANDS = 4
@@ -24,6 +28,11 @@ export type Phase = 'mode-select' | 'blind-select' | 'playing' | 'shop' | 'game-
 
 /** 'enemy': blinds are enemies with HP. 'classic': blinds are a plain score target, like original Balatro. */
 export type GameMode = 'enemy' | 'classic'
+
+export interface LastConsumableUsed {
+  kind: 'tarot' | 'planet'
+  id: string
+}
 
 export interface RunState {
   phase: Phase
@@ -55,6 +64,11 @@ export interface RunState {
   bonusDiscardsPerRound: number
   bonusCatSlots: number
   removedCardIds: string[]
+  /** Permanent rank/suit changes (Strength, Death, Star/Moon/Sun/World), keyed by original deck card id.
+   *  Applied whenever a fresh round deck is dealt, so they survive across rounds. */
+  cardOverrides: Record<string, Partial<Pick<Card, 'rank' | 'suit'>>>
+  consumables: ConsumableItem[]
+  lastConsumableUsed: LastConsumableUsed | null
 }
 
 export function createInitialRunState(): RunState {
@@ -88,6 +102,9 @@ export function createInitialRunState(): RunState {
     bonusDiscardsPerRound: 0,
     bonusCatSlots: 0,
     removedCardIds: [],
+    cardOverrides: {},
+    consumables: [],
+    lastConsumableUsed: null,
   }
 }
 
@@ -107,7 +124,10 @@ export function startRound(state: RunState): RunState {
   const boss = state.blind === 'boss' ? bossBlindForAnte(state.ante) : null
 
   const removed = new Set(state.removedCardIds)
-  const shuffled = shuffle(createDeck().filter((c) => !removed.has(c.id)))
+  const deck = createDeck()
+    .filter((c) => !removed.has(c.id))
+    .map((c) => (state.cardOverrides[c.id] ? { ...c, ...state.cardOverrides[c.id] } : c))
+  const shuffled = shuffle(deck)
 
   const roundHandSize = Math.max(1, HAND_SIZE - (boss?.effect === 'reduced_hand_size' ? 2 : 0))
   const hand = shuffled.slice(0, roundHandSize)
@@ -152,6 +172,23 @@ export function toggleSelect(state: RunState, cardId: string): RunState {
   }
   if (state.selectedIds.length >= 5) return state
   return { ...state, selectedIds: [...state.selectedIds, cardId] }
+}
+
+export function clearSelection(state: RunState): RunState {
+  if (state.selectedIds.length === 0) return state
+  return { ...state, selectedIds: [] }
+}
+
+export function reorderHand(state: RunState, cardId: string, direction: 'left' | 'right'): RunState {
+  if (state.phase !== 'playing') return state
+  const index = state.hand.findIndex((c) => c.id === cardId)
+  if (index === -1) return state
+  const swapWith = direction === 'left' ? index - 1 : index + 1
+  if (swapWith < 0 || swapWith >= state.hand.length) return state
+
+  const hand = [...state.hand]
+  ;[hand[index], hand[swapWith]] = [hand[swapWith], hand[index]]
+  return { ...state, hand }
 }
 
 function winRound(state: RunState): RunState {
@@ -286,6 +323,24 @@ export function buyShopSlot(state: RunState, slotId: string): RunState {
   }
 
   if (!slot.packCategory) return state
+
+  if (slot.packCategory === 'tarot') {
+    if (state.consumables.length >= MAX_CONSUMABLE_SLOTS) return state
+    const def = pick(TAROT_CARDS, Math.random)
+    const item: ConsumableItem = {
+      instanceId: `${def.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      kind: 'tarot',
+      cardId: def.id,
+    }
+    return {
+      ...state,
+      money: state.money - slot.cost,
+      consumables: [...state.consumables, item],
+      shopOffers: state.shopOffers.filter((s) => s.id !== slotId),
+      message: `Added ${def.icon} ${def.name} to your consumables!`,
+    }
+  }
+
   const afterPurchase = { ...state, money: state.money - slot.cost }
   const { state: nextState, message } = openPack(slot.packCategory, afterPurchase)
 
@@ -294,6 +349,29 @@ export function buyShopSlot(state: RunState, slotId: string): RunState {
     shopOffers: nextState.shopOffers.filter((s) => s.id !== slotId),
     message,
   }
+}
+
+/** Uses a held consumable. `targetIds` are cards selected from the current
+ *  hand, required only for cards whose Tarot definition has minTargets > 0. */
+export function useConsumable(state: RunState, instanceId: string, targetIds: string[]): RunState {
+  const usablePhases: Phase[] = ['blind-select', 'playing', 'shop']
+  if (!usablePhases.includes(state.phase)) return state
+
+  const item = state.consumables.find((c) => c.instanceId === instanceId)
+  if (!item) return state
+
+  const def = TAROT_CARDS.find((t) => t.id === item.cardId)
+  if (!def) return state
+  if (targetIds.length < def.minTargets || targetIds.length > def.maxTargets) return state
+  if (def.minTargets > 0 && state.phase !== 'playing') return state
+
+  const stateWithoutItem: RunState = {
+    ...state,
+    consumables: state.consumables.filter((c) => c.instanceId !== instanceId),
+  }
+  const { state: nextState, message } = applyTarot(def.id as TarotId, stateWithoutItem, targetIds)
+
+  return { ...nextState, selectedIds: [], message }
 }
 
 export function sellCat(state: RunState, instanceId: string): RunState {

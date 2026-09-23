@@ -1,9 +1,9 @@
-import { createDeck, rankLabel, suitSymbol } from './cards'
 import { CAT_ROSTER, catDef } from './cats/roster'
 import { BANNER_RARITIES, type OwnedCat } from './cats/types'
 import { HAND_TYPES, handTypeDef } from '../data/handTypes'
 import { PLANET_CARDS } from '../data/planets'
 import { MAX_CAT_SLOTS } from './shop'
+import { pick } from './rng'
 import type { RunState } from './runState'
 
 export type PackCategory = 'tarot' | 'planet' | 'spectral'
@@ -20,7 +20,7 @@ export const PACK_INFO: Record<PackCategory, PackInfo> = {
     label: 'Tarot Pack',
     icon: '🔮',
     cost: 4,
-    description: 'A random boon: money, a permanent hand/discard/Cat-slot bonus, or a removed card.',
+    description: 'Adds a random Tarot card to your consumable inventory (max 2 held).',
   },
   planet: {
     label: 'Planet Pack',
@@ -47,55 +47,13 @@ export function effectiveMaxCatSlots(bonusCatSlots: number): number {
   return MAX_CAT_SLOTS + bonusCatSlots
 }
 
-function pick<T>(items: T[], rng: () => number): T {
-  return items[Math.floor(rng() * items.length)]
-}
-
 function applyPlanet(state: RunState, rng: () => number): PackResult {
   const planet = pick(PLANET_CARDS, rng)
   const newLevel = (state.handLevels[planet.handType] ?? 1) + 1
   const handLevels = { ...state.handLevels, [planet.handType]: newLevel }
   return {
-    state: { ...state, handLevels },
+    state: { ...state, handLevels, lastConsumableUsed: { kind: 'planet', id: planet.id } },
     message: `${planet.icon} ${planet.name}: ${handTypeDef(planet.handType).label} leveled up to Lv.${newLevel}!`,
-  }
-}
-
-type TarotChoice = 'money' | 'hand' | 'discard' | 'slot' | 'remove'
-
-function applyTarot(state: RunState, rng: () => number): PackResult {
-  const choice = pick<TarotChoice>(['money', 'hand', 'discard', 'slot', 'remove'], rng)
-
-  switch (choice) {
-    case 'money':
-      return { state: { ...state, money: state.money + 8 }, message: '🔮 Tarot Card: +$8!' }
-    case 'hand':
-      return {
-        state: { ...state, bonusHandsPerRound: state.bonusHandsPerRound + 1 },
-        message: '🔮 Tarot Card: +1 hand per round for the rest of the run!',
-      }
-    case 'discard':
-      return {
-        state: { ...state, bonusDiscardsPerRound: state.bonusDiscardsPerRound + 1 },
-        message: '🔮 Tarot Card: +1 discard per round for the rest of the run!',
-      }
-    case 'slot':
-      return {
-        state: { ...state, bonusCatSlots: state.bonusCatSlots + 1 },
-        message: '🔮 Tarot Card: +1 Cat slot for the rest of the run!',
-      }
-    case 'remove': {
-      const removed = new Set(state.removedCardIds)
-      const pool = createDeck().filter((c) => !removed.has(c.id))
-      if (pool.length === 0) {
-        return { state: { ...state, money: state.money + 8 }, message: '🔮 Tarot Card: +$8!' }
-      }
-      const card = pick(pool, rng)
-      return {
-        state: { ...state, removedCardIds: [...state.removedCardIds, card.id] },
-        message: `🔮 Tarot Card: Removed the ${rankLabel(card.rank)}${suitSymbol(card.suit)} from your deck!`,
-      }
-    }
   }
 }
 
@@ -153,8 +111,14 @@ function applySpectral(state: RunState, rng: () => number): PackResult {
   }
 }
 
-export function openPack(category: PackCategory, state: RunState, rng: () => number = Math.random): PackResult {
+/** Opens a Planet or Spectral pack. Tarot packs are handled separately — see
+ *  buyShopSlot in runState.ts — since they add a card to the consumable
+ *  inventory instead of applying an effect immediately. */
+export function openPack(
+  category: Exclude<PackCategory, 'tarot'>,
+  state: RunState,
+  rng: () => number = Math.random,
+): PackResult {
   if (category === 'planet') return applyPlanet(state, rng)
-  if (category === 'tarot') return applyTarot(state, rng)
   return applySpectral(state, rng)
 }
