@@ -8,9 +8,11 @@ import {
   discardSelected,
   leaveShop,
   playHand,
+  reorderCats,
   reorderHand,
   rerollShop,
   sellCat,
+  sellConsumable,
   skipBlind,
   startRound,
   toggleSelect,
@@ -33,7 +35,9 @@ interface GameStore {
   reroll: () => void
   leave: () => void
   useCard: (instanceId: string, targetIds: string[]) => void
+  sellCard: (instanceId: string) => void
   moveCard: (cardId: string, direction: 'left' | 'right') => void
+  moveCat: (instanceId: string, direction: 'left' | 'right') => void
   clearCardSelection: () => void
 }
 
@@ -53,9 +57,11 @@ export const useGameStore = create<GameStore>()(
       reroll: () => set((s) => ({ run: rerollShop(s.run) })),
       leave: () => set((s) => ({ run: leaveShop(s.run) })),
       useCard: (instanceId, targetIds) => set((s) => ({ run: useConsumable(s.run, instanceId, targetIds) })),
+      sellCard: (instanceId) => set((s) => ({ run: sellConsumable(s.run, instanceId) })),
       moveCard: (cardId, direction) => set((s) => ({ run: reorderHand(s.run, cardId, direction) })),
+      moveCat: (instanceId, direction) => set((s) => ({ run: reorderCats(s.run, instanceId, direction) })),
       clearCardSelection: () => set((s) => ({ run: clearSelection(s.run) })),
     }),
-    { name: 'battlecatsdeck-run-v4' },
+    { name: 'battlecatsdeck-run-v5' },
   ),
 )

@@ -26,7 +26,10 @@ function groupByRank(cards: Card[]): RankGroup[] {
 }
 
 function isFlush(cards: Card[]): boolean {
-  return cards.length === 5 && new Set(cards.map((c) => c.suit)).size === 1
+  if (cards.length !== 5) return false
+  // Wild cards count as every suit, so only the non-wild suits need to agree.
+  const nonWildSuits = new Set(cards.filter((c) => c.enhancement !== 'wild').map((c) => c.suit))
+  return nonWildSuits.size <= 1
 }
 
 function isStraight(cards: Card[]): boolean {

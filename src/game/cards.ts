@@ -3,10 +3,20 @@ export type Suit = 'hearts' | 'diamonds' | 'clubs' | 'spades'
 /** 2-10 are numeric, 11=Jack, 12=Queen, 13=King, 14=Ace */
 export type Rank = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14
 
+export type Enhancement = 'bonus' | 'mult' | 'wild' | 'glass' | 'steel' | 'stone' | 'gold' | 'lucky'
+export type Seal = 'gold' | 'red' | 'blue' | 'purple'
+/** Playing cards can't be Negative — that's Cat/consumable-only. */
+export type CardEdition = 'foil' | 'holographic' | 'polychrome'
+
 export interface Card {
   id: string
   suit: Suit
   rank: Rank
+  /** at most one at a time; permanent for the run unless replaced */
+  enhancement?: Enhancement
+  /** at most 2, order doesn't matter; permanent for the run unless replaced/removed */
+  seals?: Seal[]
+  edition?: CardEdition
 }
 
 export const SUITS: Suit[] = ['hearts', 'diamonds', 'clubs', 'spades']

@@ -1,21 +1,23 @@
-/**
- * The Fool, High Priestess, Emperor, Hermit, Strength, Hanged Man, Death,
- * Temperance, Star, Moon, Sun, Judgement, World — the 13 Tarot cards that
- * don't depend on the card-enhancement/edition systems.
- *
- * Magician, Empress, Hierophant, Lovers, Chariot, Justice, Wheel of
- * Fortune, Devil, and Tower are intentionally left out of this list until
- * enhancements/editions are implemented, so they never appear in a pack.
- */
+import type { Enhancement } from '../game/cards'
+
 export type TarotId =
   | 'fool'
+  | 'magician'
   | 'high_priestess'
+  | 'empress'
   | 'emperor'
+  | 'hierophant'
+  | 'lovers'
+  | 'chariot'
+  | 'justice'
   | 'hermit'
+  | 'wheel_of_fortune'
   | 'strength'
   | 'hanged_man'
   | 'death'
   | 'temperance'
+  | 'devil'
+  | 'tower'
   | 'star'
   | 'moon'
   | 'sun'
@@ -30,6 +32,8 @@ export interface TarotCardDef {
   /** cards the player must select from their hand before using this card (0 = none) */
   minTargets: number
   maxTargets: number
+  /** set for the 8 cards that just enhance N selected cards to a given type */
+  enhancement?: Enhancement
 }
 
 export const TAROT_CARDS: TarotCardDef[] = [
@@ -42,12 +46,30 @@ export const TAROT_CARDS: TarotCardDef[] = [
     maxTargets: 0,
   },
   {
+    id: 'magician',
+    name: 'The Magician',
+    icon: '🎩',
+    description: 'Enhances up to 2 selected cards into Lucky Cards.',
+    minTargets: 1,
+    maxTargets: 2,
+    enhancement: 'lucky',
+  },
+  {
     id: 'high_priestess',
     name: 'The High Priestess',
     icon: '🌙',
     description: 'Creates up to 2 random Planet cards, applied instantly.',
     minTargets: 0,
     maxTargets: 0,
+  },
+  {
+    id: 'empress',
+    name: 'The Empress',
+    icon: '👸',
+    description: 'Enhances up to 2 selected cards into Mult Cards.',
+    minTargets: 1,
+    maxTargets: 2,
+    enhancement: 'mult',
   },
   {
     id: 'emperor',
@@ -58,10 +80,54 @@ export const TAROT_CARDS: TarotCardDef[] = [
     maxTargets: 0,
   },
   {
+    id: 'hierophant',
+    name: 'The Hierophant',
+    icon: '📜',
+    description: 'Enhances up to 2 selected cards into Bonus Cards.',
+    minTargets: 1,
+    maxTargets: 2,
+    enhancement: 'bonus',
+  },
+  {
+    id: 'lovers',
+    name: 'The Lovers',
+    icon: '💞',
+    description: 'Enhances 1 selected card into a Wild Card.',
+    minTargets: 1,
+    maxTargets: 1,
+    enhancement: 'wild',
+  },
+  {
+    id: 'chariot',
+    name: 'The Chariot',
+    icon: '🏇',
+    description: 'Enhances 1 selected card into a Steel Card.',
+    minTargets: 1,
+    maxTargets: 1,
+    enhancement: 'steel',
+  },
+  {
+    id: 'justice',
+    name: 'Justice',
+    icon: '⚔️',
+    description: 'Enhances 1 selected card into a Glass Card.',
+    minTargets: 1,
+    maxTargets: 1,
+    enhancement: 'glass',
+  },
+  {
     id: 'hermit',
     name: 'The Hermit',
     icon: '🕯️',
     description: 'Doubles your money, up to +$20.',
+    minTargets: 0,
+    maxTargets: 0,
+  },
+  {
+    id: 'wheel_of_fortune',
+    name: 'Wheel of Fortune',
+    icon: '🎡',
+    description: '1 in 4 chance to add a Foil, Holographic, or Polychrome edition to a random Cat.',
     minTargets: 0,
     maxTargets: 0,
   },
@@ -96,6 +162,24 @@ export const TAROT_CARDS: TarotCardDef[] = [
     description: 'Gives the total sell value of all owned Cats, up to $50.',
     minTargets: 0,
     maxTargets: 0,
+  },
+  {
+    id: 'devil',
+    name: 'The Devil',
+    icon: '😈',
+    description: 'Enhances 1 selected card into a Gold Card.',
+    minTargets: 1,
+    maxTargets: 1,
+    enhancement: 'gold',
+  },
+  {
+    id: 'tower',
+    name: 'The Tower',
+    icon: '🗼',
+    description: 'Enhances 1 selected card into a Stone Card.',
+    minTargets: 1,
+    maxTargets: 1,
+    enhancement: 'stone',
   },
   {
     id: 'star',

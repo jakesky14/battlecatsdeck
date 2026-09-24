@@ -68,6 +68,107 @@ describe('computeScore', () => {
     expect(leveled.chips).toBe(base.chips + 15 * 2)
     expect(leveled.mult).toBe(base.mult + 1 * 2)
   })
+
+  describe('enhancements', () => {
+    it('Bonus Card adds +30 chips when scored', () => {
+      const card: Card = { ...c(7, 'hearts'), enhancement: 'bonus' }
+      expect(computeScore([card], [], baseOptions).chips).toBe(5 + 7 + 30)
+    })
+
+    it('Mult Card adds +4 mult when scored', () => {
+      const card: Card = { ...c(7, 'hearts'), enhancement: 'mult' }
+      expect(computeScore([card], [], baseOptions).mult).toBe(1 + 4)
+    })
+
+    it('Stone Card adds +50 chips and is excluded from hand-shape detection', () => {
+      const pair = [c(7, 'hearts'), c(7, 'clubs')]
+      const stone: Card = { ...c(2, 'spades'), enhancement: 'stone' }
+      const result = computeScore([...pair, stone], [], baseOptions)
+      expect(result.handType).toBe('pair')
+      expect(result.scoringCards).toHaveLength(3)
+      expect(result.chips).toBe(10 + 7 + 7 + 50)
+      expect(result.mult).toBe(2)
+    })
+
+    it('Glass Card doubles mult and can destroy itself after scoring', () => {
+      const card: Card = { ...c(7, 'hearts'), enhancement: 'glass' }
+      const destroyed = computeScore([card], [], { ...baseOptions, rng: () => 0 })
+      expect(destroyed.mult).toBe(1 * 2)
+      expect(destroyed.destroyedCardIds).toContain(card.id)
+
+      const safe = computeScore([card], [], { ...baseOptions, rng: () => 0.99 })
+      expect(safe.destroyedCardIds).toHaveLength(0)
+    })
+
+    it('Steel Card multiplies mult while held, not played', () => {
+      const played = [c(7, 'hearts')]
+      const steelHeld: Card = { ...c(9, 'clubs'), enhancement: 'steel' }
+      const withSteel = computeScore(played, [], { ...baseOptions, heldCards: [steelHeld] })
+      const without = computeScore(played, [], baseOptions)
+      expect(withSteel.mult).toBeCloseTo(without.mult * 1.5)
+    })
+
+    it('Lucky Card independently rolls +20 mult and +$20 money', () => {
+      const card: Card = { ...c(7, 'hearts'), enhancement: 'lucky' }
+      const bothHit = computeScore([card], [], { ...baseOptions, rng: () => 0 })
+      expect(bothHit.mult).toBe(1 + 20)
+      expect(bothHit.moneyGained).toBe(20)
+
+      const bothMiss = computeScore([card], [], { ...baseOptions, rng: () => 0.99 })
+      expect(bothMiss.mult).toBe(1)
+      expect(bothMiss.moneyGained).toBe(0)
+    })
+  })
+
+  describe('seals', () => {
+    it('Gold Seal earns $3 when the card is played and scores', () => {
+      const card: Card = { ...c(7, 'hearts'), seals: ['gold'] }
+      expect(computeScore([card], [], baseOptions).moneyGained).toBe(3)
+    })
+
+    it('Red Seal retriggers the card’s full scoring contribution once more', () => {
+      const withoutSeal: Card = { ...c(7, 'hearts'), enhancement: 'bonus' }
+      const withSeal: Card = { ...withoutSeal, id: 'other', seals: ['red'] }
+      const once = computeScore([withoutSeal], [], baseOptions)
+      const twice = computeScore([withSeal], [], baseOptions)
+      const perTrigger = 7 + 30
+      expect(twice.chips).toBe(once.chips + perTrigger)
+    })
+
+    it('Red Seal also doubles a Cat’s per-card trigger', () => {
+      const card: Card = { ...c(13, 'spades'), seals: ['red'] }
+      const result = computeScore([card], [owned('valkyrie_cat')], baseOptions)
+      expect(result.mult).toBe(1 + 5 + 5)
+    })
+  })
+
+  describe('editions', () => {
+    it('card editions apply their bonus when scored', () => {
+      const foil: Card = { ...c(7, 'hearts'), edition: 'foil' }
+      const holo: Card = { ...c(7, 'hearts'), edition: 'holographic' }
+      const poly: Card = { ...c(7, 'hearts'), edition: 'polychrome' }
+      expect(computeScore([foil], [], baseOptions).chips).toBe(5 + 7 + 50)
+      expect(computeScore([holo], [], baseOptions).mult).toBe(1 + 10)
+      expect(computeScore([poly], [], baseOptions).mult).toBeCloseTo(1 * 1.5)
+    })
+
+    it('cat editions apply their bonus every hand played', () => {
+      const hand = [c(7, 'hearts')]
+      const foilCat: OwnedCat = { ...owned('cat'), edition: 'foil' }
+      const holoCat: OwnedCat = { ...owned('cat'), edition: 'holographic' }
+      const polyCat: OwnedCat = { ...owned('cat'), edition: 'polychrome' }
+      expect(computeScore(hand, [foilCat], baseOptions).chips).toBe(5 + 7 + 50)
+      expect(computeScore(hand, [holoCat], baseOptions).mult).toBe(1 + 10)
+      expect(computeScore(hand, [polyCat], baseOptions).mult).toBeCloseTo(1.5)
+    })
+
+    it('catsDisabled suppresses cat editions too', () => {
+      const hand = [c(7, 'hearts')]
+      const foilCat: OwnedCat = { ...owned('cat'), edition: 'foil' }
+      const result = computeScore(hand, [foilCat], { ...baseOptions, catsDisabled: true })
+      expect(result.chips).toBe(5 + 7)
+    })
+  })
 })
 
 function defaultLevels() {

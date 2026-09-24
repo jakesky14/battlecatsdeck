@@ -1,4 +1,5 @@
 import type { Card } from '../cards'
+import type { CatEdition } from '../cardMods'
 import type { HandTypeId } from '../../data/handTypes'
 
 export type Rarity = 'common' | 'uncommon' | 'rare' | 'super_rare' | 'uber'
@@ -57,6 +58,7 @@ export interface OwnedCat {
   defId: string
   /** disabled for the current round by a boss blind debuff */
   disabledThisRound: boolean
+  edition?: CatEdition
 }
 
 export const RARITY_ORDER: Rarity[] = ['common', 'uncommon', 'rare', 'super_rare', 'uber']
@@ -79,3 +81,8 @@ export const RARITY_LABELS: Record<Rarity, string> = {
 
 /** Rarity tiers pulled from the Rare Cat Banner shop slots (excludes Normal/Special). */
 export const BANNER_RARITIES: Rarity[] = ['rare', 'super_rare', 'uber']
+
+/** Negative-edition Cats don't take up a Cat slot. */
+export function ownedCatSlotCount(cats: OwnedCat[]): number {
+  return cats.filter((c) => c.edition !== 'negative').length
+}

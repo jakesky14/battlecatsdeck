@@ -105,4 +105,26 @@ describe('evaluateHand', () => {
     const result = evaluateHand(hand)
     expect(result.handType).toBe('flush_five')
   })
+
+  it('a Wild card completes a flush with mismatched suits', () => {
+    const wild: Card = { id: 'wild', rank: 2, suit: 'clubs', enhancement: 'wild' }
+    const hand = [c(2, 'hearts'), c(5, 'hearts'), c(9, 'hearts'), c(11, 'hearts'), wild]
+    expect(evaluateHand(hand).handType).toBe('flush')
+  })
+
+  it('all-Wild cards still count as a flush', () => {
+    const hand: Card[] = [2, 5, 9, 11, 13].map((rank) => ({
+      id: `wild-${rank}`,
+      rank: rank as Card['rank'],
+      suit: 'clubs',
+      enhancement: 'wild',
+    }))
+    expect(evaluateHand(hand).handType).toBe('flush')
+  })
+
+  it('two real, conflicting suits are not a flush even with a Wild card', () => {
+    const wild: Card = { id: 'wild', rank: 2, suit: 'clubs', enhancement: 'wild' }
+    const hand = [c(2, 'hearts'), c(5, 'hearts'), c(9, 'spades'), c(11, 'hearts'), wild]
+    expect(evaluateHand(hand).handType).not.toBe('flush')
+  })
 })

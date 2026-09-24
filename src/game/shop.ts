@@ -1,6 +1,8 @@
 import { CAT_ROSTER } from './cats/roster'
 import { BANNER_RARITIES } from './cats/types'
 import { PACK_CATEGORIES, PACK_INFO, type PackCategory } from './packs'
+import { pickWeighted } from './rng'
+import { editionPriceDelta, rollCatEdition, type CatEdition } from './cardMods'
 
 export const MAX_CAT_SLOTS = 5
 export const BASE_REROLL_COST = 2
@@ -14,6 +16,8 @@ export interface ShopSlot {
   kind: ShopSlotKind
   /** set when kind === 'cat' */
   catId?: string
+  /** set when kind === 'cat'; the edition it'll be purchased with, if any */
+  catEdition?: CatEdition
   /** set when kind === 'pack' */
   packCategory?: PackCategory
   cost: number
@@ -23,17 +27,6 @@ const BANNER_RARITY_WEIGHTS: Record<'rare' | 'super_rare' | 'uber', number> = {
   rare: 55,
   super_rare: 30,
   uber: 15,
-}
-
-function pickWeighted<T extends string>(weights: Record<T, number>, rng: () => number): T {
-  const entries = Object.entries(weights) as [T, number][]
-  const total = entries.reduce((sum, [, weight]) => sum + weight, 0)
-  let roll = rng() * total
-  for (const [key, weight] of entries) {
-    if (roll < weight) return key
-    roll -= weight
-  }
-  return entries[0][0]
 }
 
 export function rerollCost(rerollsUsedThisShop: number): number {
@@ -46,10 +39,17 @@ function nextSlotId(prefix: string, rng: () => number): string {
   return `${prefix}-${slotCounter}-${Math.floor(rng() * 1e6)}`
 }
 
+function catSlot(id: string, cost: number, rng: () => number): Pick<ShopSlot, 'catId' | 'catEdition' | 'cost'> {
+  const catEdition = rollCatEdition(rng)
+  return { catId: id, catEdition, cost: cost + editionPriceDelta(catEdition) }
+}
+
 /**
  * Builds the 6 shop slots: 1 Cat Capsule (Normal cats), 3 Rare Cat Banners
  * (independent draws from the Rare/Super Rare/Uber Rare pool), and 2 packs
- * that rotate between Tarot, Planet, and Spectral.
+ * that rotate between Tarot, Planet, and Spectral. Every Cat slot also rolls
+ * an edition per CAT_EDITION_WEIGHTS (96% Base, 2% Foil, 1.4% Holographic,
+ * 0.3% Polychrome, 0.3% Negative).
  */
 export function generateShopSlots(excludeCatIds: string[], rng: () => number = Math.random): ShopSlot[] {
   const used = new Set(excludeCatIds)
@@ -58,7 +58,7 @@ export function generateShopSlots(excludeCatIds: string[], rng: () => number = M
   const commonPool = CAT_ROSTER.filter((c) => c.rarity === 'common' && !used.has(c.id))
   if (commonPool.length > 0) {
     const def = commonPool[Math.floor(rng() * commonPool.length)]
-    slots.push({ id: nextSlotId('capsule', rng), kind: 'cat', catId: def.id, cost: def.cost })
+    slots.push({ id: nextSlotId('capsule', rng), kind: 'cat', ...catSlot(def.id, def.cost, rng) })
     used.add(def.id)
   }
 
@@ -71,7 +71,7 @@ export function generateShopSlots(excludeCatIds: string[], rng: () => number = M
     if (rarityPool.length === 0) rarityPool = pool
 
     const def = rarityPool[Math.floor(rng() * rarityPool.length)]
-    slots.push({ id: nextSlotId('banner', rng), kind: 'cat', catId: def.id, cost: def.cost })
+    slots.push({ id: nextSlotId('banner', rng), kind: 'cat', ...catSlot(def.id, def.cost, rng) })
     used.add(def.id)
   }
 

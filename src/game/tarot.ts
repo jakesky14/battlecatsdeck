@@ -1,4 +1,5 @@
-import type { Card, Rank, Suit } from './cards'
+import type { Card, Enhancement, Rank, Suit } from './cards'
+import { ENHANCEMENT_LABELS } from './cardMods'
 import { rankLabel, suitSymbol } from './cards'
 import { CAT_ROSTER, catDef } from './cats/roster'
 import type { OwnedCat } from './cats/types'
@@ -15,6 +16,8 @@ export interface TarotResult {
   message: string
 }
 
+type CardPatch = Partial<Pick<Card, 'rank' | 'suit' | 'enhancement' | 'seals' | 'edition'>>
+
 function newConsumableId(cardId: string, rng: () => number): string {
   return `${cardId}-${Date.now()}-${rng().toString(36).slice(2)}`
 }
@@ -23,9 +26,9 @@ function nextRank(rank: Rank): Rank {
   return rank === 14 ? 2 : ((rank + 1) as Rank)
 }
 
-/** Applies a rank/suit change to a card in hand, and records it as a permanent
- *  override so the change survives into future rounds' freshly-dealt decks. */
-function applyCardOverride(state: RunState, cardId: string, patch: Partial<Pick<Card, 'rank' | 'suit'>>): RunState {
+/** Applies a card change in hand, and records it as a permanent override so
+ *  it survives into future rounds' freshly-dealt decks. */
+function applyCardOverride(state: RunState, cardId: string, patch: CardPatch): RunState {
   const hand = state.hand.map((c) => (c.id === cardId ? { ...c, ...patch } : c))
   const cardOverrides = {
     ...state.cardOverrides,
@@ -58,6 +61,25 @@ function applyFool(state: RunState, rng: () => number): TarotResult {
   return {
     state: { ...state, consumables: [...state.consumables, item] },
     message: `🎭 The Fool copies ${def.icon} ${def.name}!`,
+  }
+}
+
+/** Shared path for Magician, Empress, Hierophant, Lovers, Chariot, Justice, Devil, Tower —
+ *  each just enhances N selected cards to one enhancement type (replacing any existing one). */
+function applyEnhancement(
+  state: RunState,
+  targetIds: string[],
+  enhancement: Enhancement,
+  icon: string,
+  name: string,
+): TarotResult {
+  let next = state
+  for (const id of targetIds) {
+    next = applyCardOverride(next, id, { enhancement })
+  }
+  return {
+    state: next,
+    message: `${icon} ${name} enhances ${targetIds.length} card(s) into ${ENHANCEMENT_LABELS[enhancement]}s!`,
   }
 }
 
@@ -96,6 +118,24 @@ function applyHermit(state: RunState): TarotResult {
   return { state: { ...state, money: state.money + gain }, message: `🕯️ The Hermit doubles your money! (+$${gain})` }
 }
 
+const CAT_EDITION_CHOICES = ['foil', 'holographic', 'polychrome'] as const
+
+function applyWheelOfFortune(state: RunState, rng: () => number): TarotResult {
+  if (!(rng() < 1 / 4)) {
+    return { state, message: '🎡 Wheel of Fortune: no luck this time.' }
+  }
+  if (state.ownedCats.length === 0) {
+    return { state, message: '🎡 Wheel of Fortune: no Cats to enchant.' }
+  }
+  const target = pick(state.ownedCats, rng)
+  const edition = pick([...CAT_EDITION_CHOICES], rng)
+  const ownedCats = state.ownedCats.map((c) => (c.instanceId === target.instanceId ? { ...c, edition } : c))
+  return {
+    state: { ...state, ownedCats },
+    message: `🎡 Wheel of Fortune grants ${catDef(target.defId).name} a ${edition} edition!`,
+  }
+}
+
 function applyStrength(state: RunState, targetIds: string[]): TarotResult {
   let next = state
   for (const id of targetIds) {
@@ -129,7 +169,14 @@ function applyDeath(state: RunState, targetIds: string[]): TarotResult {
   }
 
   const [left, right] = positions
-  const next = applyCardOverride(state, left.card.id, { rank: right.card.rank, suit: right.card.suit })
+  // Duplicating a card copies its rank, suit, enhancement, seals, and edition.
+  const next = applyCardOverride(state, left.card.id, {
+    rank: right.card.rank,
+    suit: right.card.suit,
+    enhancement: right.card.enhancement,
+    seals: right.card.seals ? [...right.card.seals] : undefined,
+    edition: right.card.edition,
+  })
   return {
     state: next,
     message: `💀 Death converts your card into a copy of the ${rankLabel(right.card.rank)}${suitSymbol(right.card.suit)}!`,
@@ -175,6 +222,11 @@ function applyJudgement(state: RunState, rng: () => number): TarotResult {
 }
 
 function applyRest(id: Exclude<TarotId, 'fool'>, state: RunState, targetIds: string[], rng: () => number): TarotResult {
+  const def = tarotCard(id)
+  if (def.enhancement) {
+    return applyEnhancement(state, targetIds, def.enhancement, def.icon, def.name)
+  }
+
   switch (id) {
     case 'high_priestess':
       return applyHighPriestess(state, rng)
@@ -182,6 +234,8 @@ function applyRest(id: Exclude<TarotId, 'fool'>, state: RunState, targetIds: str
       return applyEmperor(state, rng)
     case 'hermit':
       return applyHermit(state)
+    case 'wheel_of_fortune':
+      return applyWheelOfFortune(state, rng)
     case 'strength':
       return applyStrength(state, targetIds)
     case 'hanged_man':
@@ -200,6 +254,8 @@ function applyRest(id: Exclude<TarotId, 'fool'>, state: RunState, targetIds: str
       return applySuitConversion(state, targetIds, 'spades', '🌍 The World')
     case 'judgement':
       return applyJudgement(state, rng)
+    default:
+      throw new Error(`No effect implemented for tarot card: ${id}`)
   }
 }
 

@@ -17,7 +17,9 @@ export function PlayingScreen() {
   const play = useGameStore((s) => s.play)
   const discard = useGameStore((s) => s.discard)
   const useCard = useGameStore((s) => s.useCard)
+  const sellCard = useGameStore((s) => s.sellCard)
   const moveCard = useGameStore((s) => s.moveCard)
+  const moveCat = useGameStore((s) => s.moveCat)
   const clearCardSelection = useGameStore((s) => s.clearCardSelection)
 
   const [targetingInstanceId, setTargetingInstanceId] = useState<string | null>(null)
@@ -56,6 +58,10 @@ export function PlayingScreen() {
   function handleConsumableUse(instanceId: string) {
     const item = run.consumables.find((c) => c.instanceId === instanceId)
     if (!item) return
+    if (item.kind === 'planet') {
+      useCard(instanceId, [])
+      return
+    }
     const def = tarotCard(item.cardId)
     if (def.minTargets > 0) {
       startTargeting(instanceId)
@@ -108,7 +114,7 @@ export function PlayingScreen() {
 
       <div className="rounded-lg bg-zinc-900 p-3">
         <div className="mb-2 text-sm font-semibold text-zinc-300">Your Cats</div>
-        <CatRow ownedCats={run.ownedCats} />
+        <CatRow ownedCats={run.ownedCats} onReorder={moveCat} />
       </div>
 
       <div className="rounded-lg bg-zinc-900 p-3">
@@ -117,6 +123,7 @@ export function PlayingScreen() {
           consumables={run.consumables}
           phase={run.phase}
           onUse={handleConsumableUse}
+          onSell={sellCard}
           busy={!!targetingInstanceId}
         />
       </div>

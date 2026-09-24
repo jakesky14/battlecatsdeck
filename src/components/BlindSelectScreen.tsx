@@ -10,6 +10,8 @@ export function BlindSelectScreen() {
   const playBlind = useGameStore((s) => s.playBlind)
   const skip = useGameStore((s) => s.skip)
   const useCard = useGameStore((s) => s.useCard)
+  const sellCard = useGameStore((s) => s.sellCard)
+  const moveCat = useGameStore((s) => s.moveCat)
 
   const enemy = getEnemyForBlind(run.ante, run.blind)
   const bossDescription = run.blind === 'boss' ? bossBlindForAnte(run.ante).description : undefined
@@ -52,7 +54,7 @@ export function BlindSelectScreen() {
 
       <div className="w-full">
         <div className="mb-2 text-sm font-semibold text-zinc-300">Your Cats</div>
-        <CatRow ownedCats={run.ownedCats} />
+        <CatRow ownedCats={run.ownedCats} onReorder={moveCat} />
       </div>
 
       <div className="w-full">
@@ -61,6 +63,7 @@ export function BlindSelectScreen() {
           consumables={run.consumables}
           phase={run.phase}
           onUse={(instanceId) => useCard(instanceId, [])}
+          onSell={sellCard}
         />
       </div>
     </div>

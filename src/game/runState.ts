@@ -1,9 +1,11 @@
 import type { Card, Suit } from './cards'
 import { createDeck, shuffle } from './cards'
 import type { BlindKind, OwnedCat } from './cats/types'
+import { ownedCatSlotCount } from './cats/types'
 import { catDef } from './cats/roster'
 import { computeScore, type ScoreResult } from './scoring'
-import { defaultHandLevels, type HandTypeId } from '../data/handTypes'
+import { defaultHandLevels, handTypeDef, type HandTypeId } from '../data/handTypes'
+import { planetCard, planetForHandType } from '../data/planets'
 import { TAROT_CARDS, type TarotId } from '../data/tarots'
 import {
   BLIND_REWARD,
@@ -16,6 +18,7 @@ import {
 import { generateShopSlots, rerollCost, type ShopSlot } from './shop'
 import { effectiveMaxCatSlots, openPack } from './packs'
 import { applyTarot } from './tarot'
+import { GOLD_CARD_HELD_MONEY, PLANET_SELL_VALUE, TAROT_SELL_VALUE, editionPriceDelta } from './cardMods'
 import { MAX_CONSUMABLE_SLOTS, type ConsumableItem } from './consumables'
 import { pick } from './rng'
 
@@ -64,9 +67,9 @@ export interface RunState {
   bonusDiscardsPerRound: number
   bonusCatSlots: number
   removedCardIds: string[]
-  /** Permanent rank/suit changes (Strength, Death, Star/Moon/Sun/World), keyed by original deck card id.
-   *  Applied whenever a fresh round deck is dealt, so they survive across rounds. */
-  cardOverrides: Record<string, Partial<Pick<Card, 'rank' | 'suit'>>>
+  /** Permanent card changes (Strength, Death, Star/Moon/Sun/World, enhancement Tarot cards), keyed by
+   *  original deck card id. Applied whenever a fresh round deck is dealt, so they survive across rounds. */
+  cardOverrides: Record<string, Partial<Pick<Card, 'rank' | 'suit' | 'enhancement' | 'seals' | 'edition'>>>
   consumables: ConsumableItem[]
   lastConsumableUsed: LastConsumableUsed | null
 }
@@ -191,6 +194,49 @@ export function reorderHand(state: RunState, cardId: string, direction: 'left' |
   return { ...state, hand }
 }
 
+/** Reorders owned Cats — order matters for any future Cat whose effect depends on board position. */
+export function reorderCats(state: RunState, instanceId: string, direction: 'left' | 'right'): RunState {
+  const index = state.ownedCats.findIndex((c) => c.instanceId === instanceId)
+  if (index === -1) return state
+  const swapWith = direction === 'left' ? index - 1 : index + 1
+  if (swapWith < 0 || swapWith >= state.ownedCats.length) return state
+
+  const ownedCats = [...state.ownedCats]
+  ;[ownedCats[index], ownedCats[swapWith]] = [ownedCats[swapWith], ownedCats[index]]
+  return { ...state, ownedCats }
+}
+
+function newId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+/** Gold enhancement money + Blue Seal Planet creation, checked once when a round actually ends. */
+function applyRoundEndHeldEffects(
+  state: RunState,
+  heldCards: Card[],
+  won: boolean,
+  winningHandType: HandTypeId | null,
+): RunState {
+  let money = state.money
+  for (const card of heldCards) {
+    if (card.enhancement === 'gold') money += GOLD_CARD_HELD_MONEY
+  }
+
+  let consumables = state.consumables
+  if (won && winningHandType) {
+    const planet = planetForHandType(winningHandType)
+    if (planet) {
+      for (const card of heldCards) {
+        if (!card.seals?.includes('blue')) continue
+        if (consumables.length >= MAX_CONSUMABLE_SLOTS) continue
+        consumables = [...consumables, { instanceId: newId(planet.id), kind: 'planet', cardId: planet.id }]
+      }
+    }
+  }
+
+  return { ...state, money, consumables }
+}
+
 function winRound(state: RunState): RunState {
   const reward = BLIND_REWARD[state.blind] + interestEarned(state.money)
   const money = state.money + reward
@@ -240,6 +286,7 @@ export function playHand(state: RunState): RunState {
     catsDisabled: state.catsDisabledThisRound,
     handLevels: state.handLevels,
     bannedSuit: state.bannedSuitThisRound,
+    heldCards: remainingHand,
   })
 
   const roundScore = state.roundScore + result.total
@@ -247,7 +294,9 @@ export function playHand(state: RunState): RunState {
   const handsPlayedThisRound = state.handsPlayedThisRound + 1
   const { hand, drawPile } = drawUpTo(remainingHand, state.drawPile, state.roundHandSize)
   const discardPile = [...state.discardPile, ...playedCards]
-  const money = state.moneyDrainThisRound ? Math.max(0, state.money - 1) : state.money
+
+  let money = state.money + result.moneyGained
+  if (state.moneyDrainThisRound) money = Math.max(0, money - 1)
 
   const won = roundScore >= state.target
   const lost = !won && handsRemaining <= 0
@@ -265,8 +314,23 @@ export function playHand(state: RunState): RunState {
     lastResult: result,
   }
 
-  if (won) next = winRound(next)
-  else if (lost) next = { ...next, phase: 'game-over' }
+  if (result.destroyedCardIds.length > 0) {
+    const cardOverrides = { ...next.cardOverrides }
+    for (const id of result.destroyedCardIds) delete cardOverrides[id]
+    next = {
+      ...next,
+      removedCardIds: [...next.removedCardIds, ...result.destroyedCardIds],
+      cardOverrides,
+    }
+  }
+
+  if (won) {
+    next = applyRoundEndHeldEffects(next, remainingHand, true, result.handType)
+    next = winRound(next)
+  } else if (lost) {
+    next = applyRoundEndHeldEffects(next, remainingHand, false, null)
+    next = { ...next, phase: 'game-over' }
+  }
 
   return next
 }
@@ -279,6 +343,16 @@ export function discardSelected(state: RunState): RunState {
   const remainingHand = state.hand.filter((c) => !state.selectedIds.includes(c.id))
   const { hand, drawPile } = drawUpTo(remainingHand, state.drawPile, state.roundHandSize)
 
+  let consumables = state.consumables
+  const created: string[] = []
+  for (const card of discarded) {
+    if (!card.seals?.includes('purple')) continue
+    if (consumables.length >= MAX_CONSUMABLE_SLOTS) continue
+    const def = pick(TAROT_CARDS, Math.random)
+    consumables = [...consumables, { instanceId: newId(def.id), kind: 'tarot', cardId: def.id }]
+    created.push(`${def.icon} ${def.name}`)
+  }
+
   return {
     ...state,
     hand,
@@ -287,6 +361,8 @@ export function discardSelected(state: RunState): RunState {
     selectedIds: [],
     discardsRemaining: state.discardsRemaining - 1,
     discardsUsedThisRound: state.discardsUsedThisRound + 1,
+    consumables,
+    message: created.length > 0 ? `🟣 Purple Seal creates ${created.join(' & ')}!` : state.message,
   }
 }
 
@@ -305,12 +381,13 @@ export function buyShopSlot(state: RunState, slotId: string): RunState {
 
   if (slot.kind === 'cat') {
     if (!slot.catId) return state
-    if (state.ownedCats.length >= effectiveMaxCatSlots(state.bonusCatSlots)) return state
+    if (ownedCatSlotCount(state.ownedCats) >= effectiveMaxCatSlots(state.bonusCatSlots)) return state
 
     const instance: OwnedCat = {
-      instanceId: `${slot.catId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      instanceId: newId(slot.catId),
       defId: slot.catId,
       disabledThisRound: false,
+      edition: slot.catEdition,
     }
 
     return {
@@ -318,7 +395,7 @@ export function buyShopSlot(state: RunState, slotId: string): RunState {
       money: state.money - slot.cost,
       ownedCats: [...state.ownedCats, instance],
       shopOffers: state.shopOffers.filter((s) => s.id !== slotId),
-      message: null,
+      message: slot.catEdition ? `Recruited a ${slot.catEdition} ${catDef(slot.catId).name}!` : null,
     }
   }
 
@@ -327,11 +404,7 @@ export function buyShopSlot(state: RunState, slotId: string): RunState {
   if (slot.packCategory === 'tarot') {
     if (state.consumables.length >= MAX_CONSUMABLE_SLOTS) return state
     const def = pick(TAROT_CARDS, Math.random)
-    const item: ConsumableItem = {
-      instanceId: `${def.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      kind: 'tarot',
-      cardId: def.id,
-    }
+    const item: ConsumableItem = { instanceId: newId(def.id), kind: 'tarot', cardId: def.id }
     return {
       ...state,
       money: state.money - slot.cost,
@@ -352,13 +425,27 @@ export function buyShopSlot(state: RunState, slotId: string): RunState {
 }
 
 /** Uses a held consumable. `targetIds` are cards selected from the current
- *  hand, required only for cards whose Tarot definition has minTargets > 0. */
+ *  hand, required only for Tarot cards whose definition has minTargets > 0.
+ *  A 'planet' item (from a Blue Seal) just levels up its hand type instantly. */
 export function useConsumable(state: RunState, instanceId: string, targetIds: string[]): RunState {
   const usablePhases: Phase[] = ['blind-select', 'playing', 'shop']
   if (!usablePhases.includes(state.phase)) return state
 
   const item = state.consumables.find((c) => c.instanceId === instanceId)
   if (!item) return state
+
+  if (item.kind === 'planet') {
+    const planet = planetCard(item.cardId)
+    const newLevel = (state.handLevels[planet.handType] ?? 1) + 1
+    return {
+      ...state,
+      handLevels: { ...state.handLevels, [planet.handType]: newLevel },
+      consumables: state.consumables.filter((c) => c.instanceId !== instanceId),
+      lastConsumableUsed: { kind: 'planet', id: planet.id },
+      selectedIds: [],
+      message: `${planet.icon} ${planet.name}: ${handTypeDef(planet.handType).label} leveled up to Lv.${newLevel}!`,
+    }
+  }
 
   const def = TAROT_CARDS.find((t) => t.id === item.cardId)
   if (!def) return state
@@ -374,13 +461,25 @@ export function useConsumable(state: RunState, instanceId: string, targetIds: st
   return { ...nextState, selectedIds: [], message }
 }
 
+export function sellConsumable(state: RunState, instanceId: string): RunState {
+  const item = state.consumables.find((c) => c.instanceId === instanceId)
+  if (!item) return state
+  const value = item.kind === 'planet' ? PLANET_SELL_VALUE : TAROT_SELL_VALUE
+  return {
+    ...state,
+    money: state.money + value,
+    consumables: state.consumables.filter((c) => c.instanceId !== instanceId),
+  }
+}
+
 export function sellCat(state: RunState, instanceId: string): RunState {
   const owned = state.ownedCats.find((c) => c.instanceId === instanceId)
   if (!owned) return state
   const def = catDef(owned.defId)
+  const value = def.sellValue + editionPriceDelta(owned.edition)
   return {
     ...state,
-    money: state.money + def.sellValue,
+    money: state.money + value,
     ownedCats: state.ownedCats.filter((c) => c.instanceId !== instanceId),
   }
 }

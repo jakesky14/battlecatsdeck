@@ -1,11 +1,19 @@
 import { CatRow } from './CatRow'
 import { ConsumablesPanel } from './ConsumablesPanel'
 import { catDef } from '../game/cats/roster'
-import { RARITY_COLORS, RARITY_LABELS } from '../game/cats/types'
+import { RARITY_COLORS, RARITY_LABELS, ownedCatSlotCount } from '../game/cats/types'
+import { EDITION_LABELS } from '../game/cardMods'
 import { MAX_CONSUMABLE_SLOTS } from '../game/consumables'
 import { PACK_INFO, effectiveMaxCatSlots } from '../game/packs'
 import { rerollCost, type ShopSlot } from '../game/shop'
 import { useGameStore } from '../state/useGameStore'
+
+const EDITION_TEXT_COLOR: Record<string, string> = {
+  foil: '#67e8f9',
+  holographic: '#c084fc',
+  polychrome: '#f472b6',
+  negative: '#94a3b8',
+}
 
 function CatSlotCard({ slot, affordable, onBuy }: { slot: ShopSlot; affordable: boolean; onBuy: () => void }) {
   const def = catDef(slot.catId!)
@@ -19,6 +27,15 @@ function CatSlotCard({ slot, affordable, onBuy }: { slot: ShopSlot; affordable: 
       <span className="text-[11px] uppercase tracking-wide" style={{ color: RARITY_COLORS[def.rarity] }}>
         {RARITY_LABELS[def.rarity]}
       </span>
+      {slot.catEdition && (
+        <span
+          className="text-[10px] font-bold uppercase tracking-wide"
+          style={{ color: EDITION_TEXT_COLOR[slot.catEdition] }}
+        >
+          {EDITION_LABELS[slot.catEdition]}
+          {slot.catEdition === 'negative' ? ' (no slot cost!)' : ''}
+        </span>
+      )}
       <span className="text-xs leading-tight text-zinc-400">{def.description}</span>
       <button
         type="button"
@@ -58,14 +75,24 @@ export function ShopScreen() {
   const reroll = useGameStore((s) => s.reroll)
   const leave = useGameStore((s) => s.leave)
   const useCard = useGameStore((s) => s.useCard)
+  const sellCard = useGameStore((s) => s.sellCard)
+  const moveCat = useGameStore((s) => s.moveCat)
 
   const cost = rerollCost(run.rerollsUsedThisShop)
   const maxSlots = effectiveMaxCatSlots(run.bonusCatSlots)
-  const slotsFull = run.ownedCats.length >= maxSlots
+  const catSlotCount = ownedCatSlotCount(run.ownedCats)
+  const slotsFull = catSlotCount >= maxSlots
   const consumablesFull = run.consumables.length >= MAX_CONSUMABLE_SLOTS
 
   const catSlots = run.shopOffers.filter((s) => s.kind === 'cat')
   const packSlots = run.shopOffers.filter((s) => s.kind === 'pack')
+
+  function catAffordable(slot: ShopSlot): boolean {
+    if (run.money < slot.cost) return false
+    // Negative-edition cats never take a slot, so they're always purchasable if affordable.
+    if (slot.catEdition === 'negative') return true
+    return !slotsFull
+  }
 
   function packAffordable(slot: ShopSlot): boolean {
     if (run.money < slot.cost) return false
@@ -78,7 +105,7 @@ export function ShopScreen() {
       {run.message && <div className="text-center text-lg font-semibold text-green-400">{run.message}</div>}
       <div className="text-center text-2xl font-bold">The Shop</div>
       <div className="text-center text-sm text-zinc-400">
-        Cat slots: {run.ownedCats.length} / {maxSlots}
+        Cat slots: {catSlotCount} / {maxSlots}
       </div>
 
       <div>
@@ -88,12 +115,7 @@ export function ShopScreen() {
             <div className="text-sm text-zinc-500 italic">Sold out — leave or reroll.</div>
           )}
           {catSlots.map((slot) => (
-            <CatSlotCard
-              key={slot.id}
-              slot={slot}
-              affordable={run.money >= slot.cost && !slotsFull}
-              onBuy={() => buy(slot.id)}
-            />
+            <CatSlotCard key={slot.id} slot={slot} affordable={catAffordable(slot)} onBuy={() => buy(slot.id)} />
           ))}
         </div>
       </div>
@@ -127,7 +149,7 @@ export function ShopScreen() {
 
       <div>
         <div className="mb-2 text-sm font-semibold text-zinc-300">Your Cats (click to sell)</div>
-        <CatRow ownedCats={run.ownedCats} onSell={sell} />
+        <CatRow ownedCats={run.ownedCats} onSell={sell} onReorder={moveCat} />
       </div>
 
       <div>
@@ -136,6 +158,7 @@ export function ShopScreen() {
           consumables={run.consumables}
           phase={run.phase}
           onUse={(instanceId) => useCard(instanceId, [])}
+          onSell={sellCard}
         />
       </div>
     </div>

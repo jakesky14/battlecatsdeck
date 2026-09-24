@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { Card } from '../cards'
+import type { Card, Enhancement } from '../cards'
 import { applyTarot } from '../tarot'
 import { createInitialRunState, startRound, chooseMode, type RunState } from '../runState'
 import { MAX_CONSUMABLE_SLOTS, type ConsumableItem } from '../consumables'
 import type { OwnedCat } from '../cats/types'
+import type { TarotId } from '../../data/tarots'
 
 const low = () => 0
 
@@ -162,5 +163,77 @@ describe('applyTarot', () => {
     const state = createInitialRunState()
     const { state: next } = applyTarot('hermit', state, [])
     expect(next.lastConsumableUsed).toEqual({ kind: 'tarot', id: 'hermit' })
+  })
+
+  describe('the 8 enhancement cards', () => {
+    const cases: [TarotId, Enhancement][] = [
+      ['magician', 'lucky'],
+      ['empress', 'mult'],
+      ['hierophant', 'bonus'],
+      ['lovers', 'wild'],
+      ['chariot', 'steel'],
+      ['justice', 'glass'],
+      ['devil', 'gold'],
+      ['tower', 'stone'],
+    ]
+
+    for (const [tarotId, enhancement] of cases) {
+      it(`${tarotId} enhances the selected card into a ${enhancement} card, permanently`, () => {
+        const state = playingStateWithHand([c(5, 'hearts', 'target')])
+        const { state: next } = applyTarot(tarotId, state, ['target'])
+        expect(next.hand[0].enhancement).toBe(enhancement)
+        expect(next.cardOverrides['target']).toEqual({ enhancement })
+      })
+    }
+
+    it('replaces any existing enhancement rather than stacking', () => {
+      const state = playingStateWithHand([{ ...c(5, 'hearts', 'target'), enhancement: 'mult' }])
+      const { state: next } = applyTarot('hierophant', state, ['target'])
+      expect(next.hand[0].enhancement).toBe('bonus')
+    })
+  })
+
+  describe('Wheel of Fortune', () => {
+    it('on a hit, grants a random edition to a random owned Cat', () => {
+      const state = { ...createInitialRunState(), ownedCats: [owned('cat')] }
+      const { state: next, message } = applyTarot('wheel_of_fortune', state, [], low)
+      expect(next.ownedCats[0].edition).toBeDefined()
+      expect(message.length).toBeGreaterThan(0)
+    })
+
+    it('on a miss, does nothing', () => {
+      const state = { ...createInitialRunState(), ownedCats: [owned('cat')] }
+      const high = () => 1 - 1e-9
+      const { state: next, message } = applyTarot('wheel_of_fortune', state, [], high)
+      expect(next.ownedCats[0].edition).toBeUndefined()
+      expect(message).toContain('no luck')
+    })
+
+    it('fizzles with no Cats owned', () => {
+      const state = createInitialRunState()
+      const { message } = applyTarot('wheel_of_fortune', state, [], low)
+      expect(message).toContain('no Cats')
+    })
+  })
+
+  describe('Death duplicates enhancements, seals, and editions', () => {
+    it('copies the source card’s enhancement, seals, and edition onto the target', () => {
+      const left = c(3, 'hearts', 'left')
+      const right: Card = {
+        ...c(13, 'spades', 'right'),
+        enhancement: 'glass',
+        seals: ['gold', 'red'],
+        edition: 'foil',
+      }
+      const state = playingStateWithHand([left, right])
+      const { state: next } = applyTarot('death', state, ['left', 'right'])
+      expect(next.hand[0]).toMatchObject({
+        rank: 13,
+        suit: 'spades',
+        enhancement: 'glass',
+        seals: ['gold', 'red'],
+        edition: 'foil',
+      })
+    })
   })
 })
