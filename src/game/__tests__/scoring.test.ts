@@ -90,6 +90,25 @@ describe('computeScore', () => {
       expect(result.mult).toBe(2)
     })
 
+    it('a Stone Card does not complete a Full House it would otherwise complete', () => {
+      // 2H 2S 4H 4C + 4S(stone): without the stone rank/suit, this is only
+      // Two Pair (4s + 2s) — not Full House, since the stone 4♠ doesn't count
+      // as a third 4.
+      const hand: Card[] = [
+        c(2, 'hearts'),
+        c(2, 'spades'),
+        c(4, 'hearts'),
+        c(4, 'clubs'),
+        { ...c(4, 'spades'), enhancement: 'stone' },
+      ]
+      const result = computeScore(hand, [], baseOptions)
+      expect(result.handType).toBe('two_pair')
+      expect(result.scoringCards).toHaveLength(5)
+      // base two_pair 20 chips + 2 mult, plus the four real cards' rank values, plus Stone's +50
+      expect(result.chips).toBe(20 + 2 + 2 + 4 + 4 + 50)
+      expect(result.mult).toBe(2)
+    })
+
     it('Glass Card doubles mult and can destroy itself after scoring', () => {
       const card: Card = { ...c(7, 'hearts'), enhancement: 'glass' }
       const destroyed = computeScore([card], [], { ...baseOptions, rng: () => 0 })
