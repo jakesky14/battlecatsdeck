@@ -104,11 +104,12 @@ export interface EnemyIdentity {
   description?: string
 }
 
-/** Which enemy is fought for a given ante/blind. Deterministic — no RNG/state needed. */
-export function getEnemyForBlind(ante: number, blind: BlindKind): EnemyIdentity {
+/** Which enemy is fought for a given ante/blind. Deterministic — no RNG/state needed.
+ *  Pass `boss` to override the ante's usual boss (Director's Cut reroll). */
+export function getEnemyForBlind(ante: number, blind: BlindKind, boss?: BossBlindDef): EnemyIdentity {
   if (blind === 'boss') {
-    const boss = bossBlindForAnte(ante)
-    return { id: boss.id, name: boss.name, icon: boss.icon, description: boss.description }
+    const b = boss ?? bossBlindForAnte(ante)
+    return { id: b.id, name: b.name, icon: b.icon, description: b.description }
   }
   const index = (ante - 1) * 2 + (blind === 'big' ? 1 : 0)
   const enemy = REGULAR_ENEMIES[index % REGULAR_ENEMIES.length]
@@ -119,26 +120,31 @@ export function bossBlindForAnte(ante: number): BossBlindDef {
   return BOSS_BLINDS[(ante - 1) % BOSS_BLINDS.length]
 }
 
+export function bossBlindById(id: string): BossBlindDef | undefined {
+  return BOSS_BLINDS.find((b) => b.id === id)
+}
+
 export function anteBaseScore(ante: number): number {
   return Math.round(100 * Math.pow(1.6, ante - 1))
 }
 
-/** Max HP of the enemy fought at this ante/blind. */
-export function targetScore(ante: number, blind: BlindKind): number {
+/** Max HP of the enemy fought at this ante/blind. Pass `boss` to override the
+ *  ante's usual boss (Director's Cut reroll) — affects its difficulty effect. */
+export function targetScore(ante: number, blind: BlindKind, boss?: BossBlindDef): number {
   const base = anteBaseScore(ante)
   if (blind === 'small') return base
   if (blind === 'big') return Math.round(base * 1.5)
 
   let target = base * 2
-  const effect = bossBlindForAnte(ante).effect
+  const effect = (boss ?? bossBlindForAnte(ante)).effect
   if (effect === 'extra_target' || effect === 'gauntlet') target = Math.round(target * 1.25)
   return Math.round(target)
 }
 
-export function blindLabel(blind: BlindKind, ante: number): string {
+export function blindLabel(blind: BlindKind, ante: number, boss?: BossBlindDef): string {
   if (blind === 'small') return 'Small Blind'
   if (blind === 'big') return 'Big Blind'
-  return `Boss Blind — ${bossBlindForAnte(ante).name}`
+  return `Boss Blind — ${(boss ?? bossBlindForAnte(ante)).name}`
 }
 
 export const BLIND_REWARD: Record<BlindKind, number> = {
@@ -149,8 +155,8 @@ export const BLIND_REWARD: Record<BlindKind, number> = {
 
 export const SKIP_BONUS = 1
 
-export function interestEarned(money: number): number {
-  return Math.min(5, Math.floor(money / 5))
+export function interestEarned(money: number, cap = 5): number {
+  return Math.min(cap, Math.floor(money / 5))
 }
 
 export const MAX_ANTE = 8

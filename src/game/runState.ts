@@ -4,28 +4,44 @@ import type { BlindKind, OwnedCat } from './cats/types'
 import { ownedCatSlotCount } from './cats/types'
 import { catDef } from './cats/roster'
 import { computeScore, type ScoreResult } from './scoring'
-import { defaultHandLevels, handTypeDef, type HandTypeId } from '../data/handTypes'
+import { defaultHandLevels, HAND_TYPES, handTypeDef, type HandTypeId } from '../data/handTypes'
 import { planetCard, planetForHandType } from '../data/planets'
-import { TAROT_CARDS, type TarotId } from '../data/tarots'
+import { TAROT_CARDS, tarotCard, type TarotId } from '../data/tarots'
+import { spectralCard, type SpectralId } from '../data/spectrals'
 import {
   BLIND_REWARD,
+  BOSS_BLINDS,
   MAX_ANTE,
   SKIP_BONUS,
+  bossBlindById,
   bossBlindForAnte,
   interestEarned,
   targetScore,
+  type BossBlindDef,
 } from './blinds'
-import { generateShopSlots, rerollCost, type ShopSlot } from './shop'
-import { effectiveMaxCatSlots, openPack } from './packs'
+import { generateShopSlots, rerollCost, type ShopGenContext, type ShopSlot } from './shop'
+import {
+  PACK_CONTENTS,
+  effectiveMaxCatSlots,
+  generatePackOptions,
+  resolvePackOption,
+  type PackCategory,
+  type PackGenContext,
+  type PackOptionEntry,
+  type PackSize,
+} from './packs'
 import { applyTarot } from './tarot'
-import { GOLD_CARD_HELD_MONEY, PLANET_SELL_VALUE, TAROT_SELL_VALUE, editionPriceDelta } from './cardMods'
-import { MAX_CONSUMABLE_SLOTS, type ConsumableItem } from './consumables'
+import { applySpectral } from './spectral'
+import { GOLD_CARD_HELD_MONEY, PLANET_SELL_VALUE, SPECTRAL_SELL_VALUE, TAROT_SELL_VALUE, editionPriceDelta } from './cardMods'
+import { effectiveMaxConsumableSlots, type ConsumableItem } from './consumables'
 import { pick } from './rng'
+import { VOUCHERS, effectiveAnte, hasVoucher, interestCap, voucherDef, type VoucherId } from './vouchers'
 
 export const HAND_SIZE = 8
 export const STARTING_HANDS = 4
 export const STARTING_DISCARDS = 3
 export const STARTING_MONEY = 4
+export const BOSS_REROLL_COST = 10
 
 export type Phase = 'mode-select' | 'blind-select' | 'playing' | 'shop' | 'game-over' | 'victory'
 
@@ -35,6 +51,14 @@ export type GameMode = 'enemy' | 'classic'
 export interface LastConsumableUsed {
   kind: 'tarot' | 'planet'
   id: string
+}
+
+export interface PackOpeningState {
+  slotId: string
+  category: PackCategory
+  size: PackSize
+  chooseRemaining: number
+  options: PackOptionEntry[]
 }
 
 export interface RunState {
@@ -72,6 +96,25 @@ export interface RunState {
   cardOverrides: Record<string, Partial<Pick<Card, 'rank' | 'suit' | 'enhancement' | 'seals' | 'edition'>>>
   consumables: ConsumableItem[]
   lastConsumableUsed: LastConsumableUsed | null
+  /** Extra playing cards added to the deck beyond the base 52 (Standard Packs,
+   *  Familiar/Grim/Incantation/Cryptid) — the deck can have more than 52 cards. */
+  extraCards: Card[]
+  ownedVouchers: VoucherId[]
+  /** The 1 voucher currently offered in the shop; persists through Small/Big
+   *  Blind shop visits and only restocks after a Boss Blind. */
+  voucherOffer: VoucherId | null
+  /** Flips true after the very first shop of the run is generated — gates the
+   *  first-visit guaranteed Buffoon Pack and the first voucher roll. */
+  hasSeenFirstShop: boolean
+  handTypePlayCounts: Record<HandTypeId, number>
+  /** Paint Brush (+1), Ectoplasm/Ouija (-1 each) — added to HAND_SIZE. */
+  bonusHandSize: number
+  /** Crystal Ball (+1) — added to MAX_CONSUMABLE_SLOTS. */
+  bonusConsumableSlots: number
+  /** Set by Director's Cut's Boss Blind reroll; cleared when a new Ante begins. */
+  bossOverrideId: string | null
+  bossRerollUsedThisAnte: boolean
+  packOpening: PackOpeningState | null
 }
 
 export function createInitialRunState(): RunState {
@@ -108,12 +151,32 @@ export function createInitialRunState(): RunState {
     cardOverrides: {},
     consumables: [],
     lastConsumableUsed: null,
+    extraCards: [],
+    ownedVouchers: [],
+    voucherOffer: null,
+    hasSeenFirstShop: false,
+    handTypePlayCounts: Object.fromEntries(HAND_TYPES.map((h) => [h.id, 0])) as Record<HandTypeId, number>,
+    bonusHandSize: 0,
+    bonusConsumableSlots: 0,
+    bossOverrideId: null,
+    bossRerollUsedThisAnte: false,
+    packOpening: null,
   }
 }
 
 export function chooseMode(state: RunState, mode: GameMode): RunState {
   if (state.phase !== 'mode-select') return state
   return { ...state, mode, phase: 'blind-select' }
+}
+
+/** Resolves which Boss Blind is actually in play — the Ante's usual boss,
+ *  shifted by Hieroglyph's Ante offset, unless Director's Cut rerolled it. */
+export function currentBossBlind(state: RunState): BossBlindDef {
+  if (state.bossOverrideId) {
+    const found = bossBlindById(state.bossOverrideId)
+    if (found) return found
+  }
+  return bossBlindForAnte(effectiveAnte(state.ante, state.ownedVouchers))
 }
 
 function drawUpTo(hand: Card[], drawPile: Card[], size: number): { hand: Card[]; drawPile: Card[] } {
@@ -124,15 +187,18 @@ function drawUpTo(hand: Card[], drawPile: Card[], size: number): { hand: Card[];
 
 export function startRound(state: RunState): RunState {
   if (state.phase !== 'blind-select') return state
-  const boss = state.blind === 'boss' ? bossBlindForAnte(state.ante) : null
+  const boss = state.blind === 'boss' ? currentBossBlind(state) : null
 
   const removed = new Set(state.removedCardIds)
-  const deck = createDeck()
+  const deck = [...createDeck(), ...state.extraCards]
     .filter((c) => !removed.has(c.id))
     .map((c) => (state.cardOverrides[c.id] ? { ...c, ...state.cardOverrides[c.id] } : c))
   const shuffled = shuffle(deck)
 
-  const roundHandSize = Math.max(1, HAND_SIZE - (boss?.effect === 'reduced_hand_size' ? 2 : 0))
+  const roundHandSize = Math.max(
+    1,
+    HAND_SIZE + state.bonusHandSize - (boss?.effect === 'reduced_hand_size' ? 2 : 0),
+  )
   const hand = shuffled.slice(0, roundHandSize)
   const drawPile = shuffled.slice(roundHandSize)
 
@@ -144,6 +210,8 @@ export function startRound(state: RunState): RunState {
     0,
     STARTING_DISCARDS + state.bonusDiscardsPerRound - discardsReduction,
   )
+
+  const ante = effectiveAnte(state.ante, state.ownedVouchers)
 
   return {
     ...state,
@@ -157,7 +225,7 @@ export function startRound(state: RunState): RunState {
     handsPlayedThisRound: 0,
     discardsUsedThisRound: 0,
     roundScore: 0,
-    target: targetScore(state.ante, state.blind),
+    target: targetScore(ante, state.blind, boss ?? undefined),
     roundHandSize,
     catsDisabledThisRound: boss?.effect === 'disable_cats',
     bannedSuitThisRound: boss?.effect === 'ban_suit' ? boss.bannedSuit ?? null : null,
@@ -168,7 +236,7 @@ export function startRound(state: RunState): RunState {
 }
 
 export function toggleSelect(state: RunState, cardId: string): RunState {
-  if (state.phase !== 'playing') return state
+  if (state.phase !== 'playing' && state.phase !== 'shop') return state
   const isSelected = state.selectedIds.includes(cardId)
   if (isSelected) {
     return { ...state, selectedIds: state.selectedIds.filter((id) => id !== cardId) }
@@ -228,7 +296,7 @@ function applyRoundEndHeldEffects(
     if (planet) {
       for (const card of heldCards) {
         if (!card.seals?.includes('blue')) continue
-        if (consumables.length >= MAX_CONSUMABLE_SLOTS) continue
+        if (consumables.length >= effectiveMaxConsumableSlots(state.bonusConsumableSlots)) continue
         consumables = [...consumables, { instanceId: newId(planet.id), kind: 'planet', cardId: planet.id }]
       }
     }
@@ -237,8 +305,15 @@ function applyRoundEndHeldEffects(
   return { ...state, money, consumables }
 }
 
+function rollVoucherOffer(ownedVouchers: VoucherId[], rng: () => number = Math.random): VoucherId | null {
+  const pool = VOUCHERS.filter((v) => !ownedVouchers.includes(v.id))
+  if (pool.length === 0) return null
+  return pick(pool, rng).id
+}
+
 function winRound(state: RunState): RunState {
-  const reward = BLIND_REWARD[state.blind] + interestEarned(state.money)
+  const cap = interestCap(state.ownedVouchers)
+  const reward = BLIND_REWARD[state.blind] + interestEarned(state.money, cap)
   const money = state.money + reward
   const ownedCats = state.ownedCats.map((c) => ({ ...c, disabledThisRound: false }))
 
@@ -246,6 +321,7 @@ function winRound(state: RunState): RunState {
     return { ...state, phase: 'victory', money, ownedCats }
   }
 
+  const enteringNewAnte = state.blind === 'boss'
   let ante = state.ante
   let blind: BlindKind = state.blind
   if (state.blind === 'small') blind = 'big'
@@ -255,7 +331,14 @@ function winRound(state: RunState): RunState {
     blind = 'small'
   }
 
-  const shopOffers = generateShopSlots(ownedCats.map((c) => c.defId))
+  const forceBuffoonPack = !state.hasSeenFirstShop
+  const shopCtx: ShopGenContext = {
+    excludeCatIds: ownedCats.map((c) => c.defId),
+    ownedVouchers: state.ownedVouchers,
+    forceBuffoonPack,
+  }
+  const shopOffers = generateShopSlots(shopCtx)
+  const voucherOffer = forceBuffoonPack || enteringNewAnte ? rollVoucherOffer(state.ownedVouchers) : state.voucherOffer
 
   return {
     ...state,
@@ -265,6 +348,10 @@ function winRound(state: RunState): RunState {
     ante,
     blind,
     shopOffers,
+    voucherOffer,
+    hasSeenFirstShop: true,
+    bossOverrideId: enteringNewAnte ? null : state.bossOverrideId,
+    bossRerollUsedThisAnte: enteringNewAnte ? false : state.bossRerollUsedThisAnte,
     rerollsUsedThisShop: 0,
     message: `Round won! +$${reward}`,
   }
@@ -294,6 +381,10 @@ export function playHand(state: RunState): RunState {
   const handsPlayedThisRound = state.handsPlayedThisRound + 1
   const { hand, drawPile } = drawUpTo(remainingHand, state.drawPile, state.roundHandSize)
   const discardPile = [...state.discardPile, ...playedCards]
+  const handTypePlayCounts = {
+    ...state.handTypePlayCounts,
+    [result.handType]: (state.handTypePlayCounts[result.handType] ?? 0) + 1,
+  }
 
   let money = state.money + result.moneyGained
   if (state.moneyDrainThisRound) money = Math.max(0, money - 1)
@@ -312,6 +403,7 @@ export function playHand(state: RunState): RunState {
     handsPlayedThisRound,
     money,
     lastResult: result,
+    handTypePlayCounts,
   }
 
   if (result.destroyedCardIds.length > 0) {
@@ -347,7 +439,7 @@ export function discardSelected(state: RunState): RunState {
   const created: string[] = []
   for (const card of discarded) {
     if (!card.seals?.includes('purple')) continue
-    if (consumables.length >= MAX_CONSUMABLE_SLOTS) continue
+    if (consumables.length >= effectiveMaxConsumableSlots(state.bonusConsumableSlots)) continue
     const def = pick(TAROT_CARDS, Math.random)
     consumables = [...consumables, { instanceId: newId(def.id), kind: 'tarot', cardId: def.id }]
     created.push(`${def.icon} ${def.name}`)
@@ -370,16 +462,18 @@ export function skipBlind(state: RunState): RunState {
   if (state.phase !== 'blind-select' || state.blind === 'boss') return state
   const money = state.money + SKIP_BONUS
   const blind: BlindKind = state.blind === 'small' ? 'big' : 'boss'
-  return { ...state, money, blind, target: targetScore(state.ante, blind) }
+  const ante = effectiveAnte(state.ante, state.ownedVouchers)
+  const boss = blind === 'boss' ? currentBossBlind(state) : undefined
+  return { ...state, money, blind, target: targetScore(ante, blind, boss) }
 }
 
-export function buyShopSlot(state: RunState, slotId: string): RunState {
+export function buyShopSlot(state: RunState, slotId: string, rng: () => number = Math.random): RunState {
   if (state.phase !== 'shop') return state
   const slot = state.shopOffers.find((s) => s.id === slotId)
   if (!slot) return state
   if (state.money < slot.cost) return state
 
-  if (slot.kind === 'cat') {
+  if (slot.kind === 'joker') {
     if (!slot.catId) return state
     if (ownedCatSlotCount(state.ownedCats) >= effectiveMaxCatSlots(state.bonusCatSlots)) return state
 
@@ -395,15 +489,16 @@ export function buyShopSlot(state: RunState, slotId: string): RunState {
       money: state.money - slot.cost,
       ownedCats: [...state.ownedCats, instance],
       shopOffers: state.shopOffers.filter((s) => s.id !== slotId),
-      message: slot.catEdition ? `Recruited a ${slot.catEdition} ${catDef(slot.catId).name}!` : null,
+      message: slot.catEdition
+        ? `Recruited a ${slot.catEdition} ${catDef(slot.catId).name}!`
+        : `Recruited a ${catDef(slot.catId).name}!`,
     }
   }
 
-  if (!slot.packCategory) return state
-
-  if (slot.packCategory === 'tarot') {
-    if (state.consumables.length >= MAX_CONSUMABLE_SLOTS) return state
-    const def = pick(TAROT_CARDS, Math.random)
+  if (slot.kind === 'tarot') {
+    if (!slot.tarotId) return state
+    if (state.consumables.length >= effectiveMaxConsumableSlots(state.bonusConsumableSlots)) return state
+    const def = tarotCard(slot.tarotId)
     const item: ConsumableItem = { instanceId: newId(def.id), kind: 'tarot', cardId: def.id }
     return {
       ...state,
@@ -414,19 +509,149 @@ export function buyShopSlot(state: RunState, slotId: string): RunState {
     }
   }
 
-  const afterPurchase = { ...state, money: state.money - slot.cost }
-  const { state: nextState, message } = openPack(slot.packCategory, afterPurchase)
+  if (slot.kind === 'planet') {
+    if (!slot.planetId) return state
+    const planet = planetCard(slot.planetId)
+    const newLevel = (state.handLevels[planet.handType] ?? 1) + 1
+    return {
+      ...state,
+      money: state.money - slot.cost,
+      handLevels: { ...state.handLevels, [planet.handType]: newLevel },
+      lastConsumableUsed: { kind: 'planet', id: planet.id },
+      shopOffers: state.shopOffers.filter((s) => s.id !== slotId),
+      message: `${planet.icon} ${planet.name}: ${handTypeDef(planet.handType).label} leveled up to Lv.${newLevel}!`,
+    }
+  }
+
+  if (slot.kind === 'playing_card') {
+    if (!slot.card) return state
+    return {
+      ...state,
+      money: state.money - slot.cost,
+      extraCards: [...state.extraCards, slot.card],
+      shopOffers: state.shopOffers.filter((s) => s.id !== slotId),
+      message: 'Added a card to your deck!',
+    }
+  }
+
+  return openPackSlot(state, slotId, rng)
+}
+
+/** Buys and opens a Pack shop slot: rolls its options and enters pack-opening
+ *  mode (see `packOpening`), without leaving the shop. */
+export function openPackSlot(state: RunState, slotId: string, rng: () => number = Math.random): RunState {
+  if (state.phase !== 'shop') return state
+  const slot = state.shopOffers.find((s) => s.id === slotId)
+  if (!slot || slot.kind !== 'pack' || !slot.packCategory || !slot.packSize) return state
+  if (state.money < slot.cost) return state
+
+  const ctx: PackGenContext = {
+    excludeCatIds: state.ownedCats.map((c) => c.defId),
+    handTypePlayCounts: state.handTypePlayCounts,
+    hasTelescope: hasVoucher(state.ownedVouchers, 'telescope'),
+    hasHone: hasVoucher(state.ownedVouchers, 'hone'),
+  }
+  const options = generatePackOptions(slot.packCategory, slot.packSize, ctx, rng)
+  const { choose } = PACK_CONTENTS[slot.packCategory][slot.packSize]
 
   return {
-    ...nextState,
-    shopOffers: nextState.shopOffers.filter((s) => s.id !== slotId),
-    message,
+    ...state,
+    money: state.money - slot.cost,
+    shopOffers: state.shopOffers.filter((s) => s.id !== slotId),
+    packOpening: { slotId, category: slot.packCategory, size: slot.packSize, chooseRemaining: choose, options },
+  }
+}
+
+/** Picks one option from the pack currently being opened. `targetIds` are
+ *  hand cards selected by the player, needed only for Tarot/Spectral options
+ *  that require targets. */
+export function choosePackOption(
+  state: RunState,
+  optionId: string,
+  targetIds: string[],
+  rng: () => number = Math.random,
+): RunState {
+  const opening = state.packOpening
+  if (!opening || opening.chooseRemaining <= 0) return state
+  const entry = opening.options.find((o) => o.optionId === optionId)
+  if (!entry) return state
+
+  if (entry.option.kind === 'joker' && ownedCatSlotCount(state.ownedCats) >= effectiveMaxCatSlots(state.bonusCatSlots)) {
+    return state
+  }
+  if (entry.option.kind === 'tarot') {
+    const def = tarotCard(entry.option.id)
+    if (targetIds.length < def.minTargets || targetIds.length > def.maxTargets) return state
+  }
+  if (entry.option.kind === 'spectral') {
+    const def = spectralCard(entry.option.id)
+    if (targetIds.length < def.minTargets || targetIds.length > def.maxTargets) return state
+  }
+
+  const { state: resolved, message } = resolvePackOption(entry.option, state, targetIds, rng)
+  const remainingOptions = opening.options.filter((o) => o.optionId !== optionId)
+  const chooseRemaining = opening.chooseRemaining - 1
+  const packOpening =
+    chooseRemaining > 0 && remainingOptions.length > 0 ? { ...opening, options: remainingOptions, chooseRemaining } : null
+
+  return { ...resolved, selectedIds: [], packOpening, message }
+}
+
+/** Leaves the pack-opening screen early, forfeiting any unused picks. */
+export function skipPackOpening(state: RunState): RunState {
+  if (!state.packOpening) return state
+  return { ...state, packOpening: null, selectedIds: [] }
+}
+
+export function buyVoucher(state: RunState): RunState {
+  if (state.phase !== 'shop' || !state.voucherOffer) return state
+  const id = state.voucherOffer
+  if (state.ownedVouchers.includes(id)) return state
+  const def = voucherDef(id)
+  if (state.money < def.cost) return state
+
+  let next: RunState = {
+    ...state,
+    money: state.money - def.cost,
+    ownedVouchers: [...state.ownedVouchers, id],
+    voucherOffer: null,
+  }
+
+  if (id === 'grabber') next = { ...next, bonusHandsPerRound: next.bonusHandsPerRound + 1 }
+  if (id === 'wasteful') next = { ...next, bonusDiscardsPerRound: next.bonusDiscardsPerRound + 1 }
+  if (id === 'paint_brush') next = { ...next, bonusHandSize: next.bonusHandSize + 1 }
+  if (id === 'crystal_ball') next = { ...next, bonusConsumableSlots: next.bonusConsumableSlots + 1 }
+  if (id === 'hieroglyph') next = { ...next, bonusHandsPerRound: next.bonusHandsPerRound - 1 }
+
+  return { ...next, message: `Bought ${def.icon} ${def.name}!` }
+}
+
+/** Director's Cut: reroll the Boss Blind before facing it, $10, once per Ante. */
+export function rerollBossBlind(state: RunState, rng: () => number = Math.random): RunState {
+  if (state.phase !== 'blind-select' || state.blind !== 'boss') return state
+  if (!hasVoucher(state.ownedVouchers, 'directors_cut')) return state
+  if (state.bossRerollUsedThisAnte) return state
+  if (state.money < BOSS_REROLL_COST) return state
+
+  const current = currentBossBlind(state)
+  const candidates = BOSS_BLINDS.filter((b) => b.id !== current.id)
+  if (candidates.length === 0) return state
+  const next = pick(candidates, rng)
+  const ante = effectiveAnte(state.ante, state.ownedVouchers)
+
+  return {
+    ...state,
+    money: state.money - BOSS_REROLL_COST,
+    bossOverrideId: next.id,
+    bossRerollUsedThisAnte: true,
+    target: targetScore(ante, 'boss', next),
+    message: `Rerolled the Boss Blind: ${next.icon} ${next.name}!`,
   }
 }
 
 /** Uses a held consumable. `targetIds` are cards selected from the current
- *  hand, required only for Tarot cards whose definition has minTargets > 0.
- *  A 'planet' item (from a Blue Seal) just levels up its hand type instantly. */
+ *  hand — either mid-round (`playing`) or from the leftover hand while in
+ *  the shop, matching how Tarot/Spectral cards opened from a pack work. */
 export function useConsumable(state: RunState, instanceId: string, targetIds: string[]): RunState {
   const usablePhases: Phase[] = ['blind-select', 'playing', 'shop']
   if (!usablePhases.includes(state.phase)) return state
@@ -447,10 +672,23 @@ export function useConsumable(state: RunState, instanceId: string, targetIds: st
     }
   }
 
+  if (item.kind === 'spectral') {
+    const def = spectralCard(item.cardId)
+    if (targetIds.length < def.minTargets || targetIds.length > def.maxTargets) return state
+    if ((def.minTargets > 0 || def.requiresHand) && state.phase === 'blind-select') return state
+
+    const stateWithoutItem: RunState = {
+      ...state,
+      consumables: state.consumables.filter((c) => c.instanceId !== instanceId),
+    }
+    const { state: nextState, message } = applySpectral(item.cardId as SpectralId, stateWithoutItem, targetIds)
+    return { ...nextState, selectedIds: [], message }
+  }
+
   const def = TAROT_CARDS.find((t) => t.id === item.cardId)
   if (!def) return state
   if (targetIds.length < def.minTargets || targetIds.length > def.maxTargets) return state
-  if (def.minTargets > 0 && state.phase !== 'playing') return state
+  if (def.minTargets > 0 && state.phase === 'blind-select') return state
 
   const stateWithoutItem: RunState = {
     ...state,
@@ -464,7 +702,7 @@ export function useConsumable(state: RunState, instanceId: string, targetIds: st
 export function sellConsumable(state: RunState, instanceId: string): RunState {
   const item = state.consumables.find((c) => c.instanceId === instanceId)
   if (!item) return state
-  const value = item.kind === 'planet' ? PLANET_SELL_VALUE : TAROT_SELL_VALUE
+  const value = item.kind === 'planet' ? PLANET_SELL_VALUE : item.kind === 'spectral' ? SPECTRAL_SELL_VALUE : TAROT_SELL_VALUE
   return {
     ...state,
     money: state.money + value,
@@ -486,10 +724,15 @@ export function sellCat(state: RunState, instanceId: string): RunState {
 
 export function rerollShop(state: RunState): RunState {
   if (state.phase !== 'shop') return state
-  const cost = rerollCost(state.rerollsUsedThisShop)
+  const cost = rerollCost(state.rerollsUsedThisShop, state.ownedVouchers)
   if (state.money < cost) return state
 
-  const shopOffers = generateShopSlots(state.ownedCats.map((c) => c.defId))
+  const shopCtx: ShopGenContext = {
+    excludeCatIds: state.ownedCats.map((c) => c.defId),
+    ownedVouchers: state.ownedVouchers,
+    forceBuffoonPack: false,
+  }
+  const shopOffers = generateShopSlots(shopCtx)
 
   return {
     ...state,
@@ -501,5 +744,7 @@ export function rerollShop(state: RunState): RunState {
 
 export function leaveShop(state: RunState): RunState {
   if (state.phase !== 'shop') return state
-  return { ...state, phase: 'blind-select', target: targetScore(state.ante, state.blind), message: null }
+  const ante = effectiveAnte(state.ante, state.ownedVouchers)
+  const boss = state.blind === 'boss' ? currentBossBlind(state) : undefined
+  return { ...state, phase: 'blind-select', target: targetScore(ante, state.blind, boss), message: null }
 }

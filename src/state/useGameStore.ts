@@ -2,18 +2,23 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import {
   buyShopSlot,
+  buyVoucher,
   chooseMode,
+  choosePackOption,
   clearSelection,
   createInitialRunState,
   discardSelected,
   leaveShop,
+  openPackSlot,
   playHand,
   reorderCats,
   reorderHand,
+  rerollBossBlind,
   rerollShop,
   sellCat,
   sellConsumable,
   skipBlind,
+  skipPackOpening,
   startRound,
   toggleSelect,
   useConsumable,
@@ -39,6 +44,11 @@ interface GameStore {
   moveCard: (cardId: string, direction: 'left' | 'right') => void
   moveCat: (instanceId: string, direction: 'left' | 'right') => void
   clearCardSelection: () => void
+  openPack: (slotId: string) => void
+  choosePack: (optionId: string, targetIds: string[]) => void
+  skipPack: () => void
+  buyVoucherOffer: () => void
+  rerollBoss: () => void
 }
 
 export const useGameStore = create<GameStore>()(
@@ -61,7 +71,12 @@ export const useGameStore = create<GameStore>()(
       moveCard: (cardId, direction) => set((s) => ({ run: reorderHand(s.run, cardId, direction) })),
       moveCat: (instanceId, direction) => set((s) => ({ run: reorderCats(s.run, instanceId, direction) })),
       clearCardSelection: () => set((s) => ({ run: clearSelection(s.run) })),
+      openPack: (slotId) => set((s) => ({ run: openPackSlot(s.run, slotId) })),
+      choosePack: (optionId, targetIds) => set((s) => ({ run: choosePackOption(s.run, optionId, targetIds) })),
+      skipPack: () => set((s) => ({ run: skipPackOpening(s.run) })),
+      buyVoucherOffer: () => set((s) => ({ run: buyVoucher(s.run) })),
+      rerollBoss: () => set((s) => ({ run: rerollBossBlind(s.run) })),
     }),
-    { name: 'battlecatsdeck-run-v5' },
+    { name: 'battlecatsdeck-run-v6' },
   ),
 )

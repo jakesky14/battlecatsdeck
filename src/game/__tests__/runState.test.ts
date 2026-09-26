@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
   buyShopSlot,
+  buyVoucher,
   chooseMode,
+  choosePackOption,
   createInitialRunState,
   discardSelected,
+  openPackSlot,
   playHand,
   reorderCats,
+  rerollBossBlind,
   sellCat,
   sellConsumable,
+  skipPackOpening,
   startRound,
   toggleSelect,
 } from '../runState'
@@ -88,7 +93,7 @@ describe('shop purchases with editions', () => {
   }
 
   it('buying a Cat with an edition applies the price delta and stores the edition', () => {
-    const slot: ShopSlot = { id: 'slot1', kind: 'cat', catId: 'cat', catEdition: 'foil', cost: 5 }
+    const slot: ShopSlot = { id: 'slot1', kind: 'joker', catId: 'cat', catEdition: 'foil', cost: 5 }
     let state = shopState({ shopOffers: [slot] })
     state = buyShopSlot(state, 'slot1')
     expect(state.ownedCats[0].edition).toBe('foil')
@@ -97,7 +102,7 @@ describe('shop purchases with editions', () => {
 
   it('a Negative-edition Cat does not count toward the Cat slot limit', () => {
     const fiveNegative = Array.from({ length: 5 }, (_, i) => owned('cat', i, 'negative'))
-    const slot: ShopSlot = { id: 'slot1', kind: 'cat', catId: 'tank_cat', cost: 4 }
+    const slot: ShopSlot = { id: 'slot1', kind: 'joker', catId: 'tank_cat', cost: 4 }
     let state = shopState({ ownedCats: fiveNegative, shopOffers: [slot] })
     state = buyShopSlot(state, 'slot1')
     expect(state.ownedCats).toHaveLength(6)
@@ -105,7 +110,7 @@ describe('shop purchases with editions', () => {
 
   it('a full (non-negative) Cat roster blocks the purchase', () => {
     const fiveNormal = Array.from({ length: 5 }, (_, i) => owned('cat', i))
-    const slot: ShopSlot = { id: 'slot1', kind: 'cat', catId: 'tank_cat', cost: 4 }
+    const slot: ShopSlot = { id: 'slot1', kind: 'joker', catId: 'tank_cat', cost: 4 }
     let state = shopState({ ownedCats: fiveNormal, shopOffers: [slot] })
     state = buyShopSlot(state, 'slot1')
     expect(state.ownedCats).toHaveLength(5)
@@ -133,6 +138,100 @@ describe('selling', () => {
     const before = state.money
     state = sellConsumable(state, 'p1')
     expect(state.money).toBe(before + 1)
+  })
+})
+
+describe('pack opening flow', () => {
+  function shopState(overrides: Partial<RunState>): RunState {
+    return { ...readyState(), phase: 'shop', money: 100, ...overrides }
+  }
+
+  it('opening a pack deducts cost, removes the slot, and rolls choosable options', () => {
+    const slot: ShopSlot = { id: 'pack1', kind: 'pack', packCategory: 'arcana', packSize: 'normal', cost: 4 }
+    let state = shopState({ shopOffers: [slot] })
+    state = openPackSlot(state, 'pack1')
+    expect(state.money).toBe(96)
+    expect(state.shopOffers).toHaveLength(0)
+    expect(state.packOpening).not.toBeNull()
+    expect(state.packOpening?.options).toHaveLength(3)
+    expect(state.packOpening?.chooseRemaining).toBe(1)
+  })
+
+  it('choosing an option applies its effect and closes the pack once choices run out', () => {
+    const slot: ShopSlot = { id: 'pack1', kind: 'pack', packCategory: 'celestial', packSize: 'normal', cost: 4 }
+    let state = shopState({ shopOffers: [slot] })
+    state = openPackSlot(state, 'pack1')
+    const optionId = state.packOpening!.options[0].optionId
+    state = choosePackOption(state, optionId, [])
+    expect(state.packOpening).toBeNull()
+    expect(state.message).toBeTruthy()
+  })
+
+  it('refuses to resolve a targeted option with the wrong number of targets', () => {
+    // rng picks index 1 of TAROT_CARDS ('magician', minTargets 1, maxTargets 2)
+    const magicianRng = () => 0.05
+    const slot: ShopSlot = { id: 'pack1', kind: 'pack', packCategory: 'arcana', packSize: 'normal', cost: 4 }
+    let state = shopState({ shopOffers: [slot], hand: [] })
+    state = openPackSlot(state, 'pack1', magicianRng)
+    const optionId = state.packOpening!.options[0].optionId
+    const before = state.packOpening
+    state = choosePackOption(state, optionId, []) // 0 targets, needs 1-2
+    expect(state.packOpening).toEqual(before)
+  })
+
+  it('skipping a pack early forfeits remaining choices', () => {
+    const slot: ShopSlot = { id: 'pack1', kind: 'pack', packCategory: 'buffoon', packSize: 'mega', cost: 8 }
+    let state = shopState({ shopOffers: [slot] })
+    state = openPackSlot(state, 'pack1')
+    expect(state.packOpening?.chooseRemaining).toBe(2)
+    state = skipPackOpening(state)
+    expect(state.packOpening).toBeNull()
+  })
+})
+
+describe('buyVoucher', () => {
+  it('purchases the offered voucher, applying its permanent effect', () => {
+    let state: RunState = { ...readyState(), phase: 'shop', money: 20, voucherOffer: 'grabber' }
+    state = buyVoucher(state)
+    expect(state.money).toBe(10)
+    expect(state.ownedVouchers).toContain('grabber')
+    expect(state.bonusHandsPerRound).toBe(1)
+    expect(state.voucherOffer).toBeNull()
+  })
+
+  it('does nothing without enough money', () => {
+    let state: RunState = { ...readyState(), phase: 'shop', money: 5, voucherOffer: 'grabber' }
+    state = buyVoucher(state)
+    expect(state.ownedVouchers).toHaveLength(0)
+  })
+})
+
+describe('rerollBossBlind', () => {
+  it("does nothing without Director's Cut", () => {
+    let state: RunState = { ...readyState(), phase: 'blind-select', blind: 'boss', money: 50 }
+    const before = state.bossOverrideId
+    state = rerollBossBlind(state)
+    expect(state.bossOverrideId).toBe(before)
+    expect(state.money).toBe(50)
+  })
+
+  it("rerolls once per Ante with Director's Cut, then refuses a second time", () => {
+    let state: RunState = {
+      ...readyState(),
+      phase: 'blind-select',
+      blind: 'boss',
+      money: 50,
+      ownedVouchers: ['directors_cut'],
+    }
+    state = rerollBossBlind(state)
+    expect(state.money).toBe(40)
+    expect(state.bossOverrideId).not.toBeNull()
+    expect(state.bossRerollUsedThisAnte).toBe(true)
+
+    const overrideAfterFirst = state.bossOverrideId
+    state = rerollBossBlind(state)
+    expect(state.bossOverrideId).toBe(overrideAfterFirst)
+    expect(state.money).toBe(40)
   })
 })
 

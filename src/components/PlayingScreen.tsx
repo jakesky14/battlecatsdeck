@@ -7,6 +7,7 @@ import { EnemyPanel } from './EnemyPanel'
 import { bossBlindForAnte, getEnemyForBlind } from '../game/blinds'
 import { suitSymbol } from '../game/cards'
 import { tarotCard } from '../data/tarots'
+import { spectralCard } from '../data/spectrals'
 import { evaluateHand } from '../game/handEvaluator'
 import { handTypeAtLevel, handTypeDef } from '../data/handTypes'
 import { useGameStore } from '../state/useGameStore'
@@ -26,7 +27,11 @@ export function PlayingScreen() {
   const targetingItem = targetingInstanceId
     ? run.consumables.find((c) => c.instanceId === targetingInstanceId)
     : undefined
-  const targetingDef = targetingItem ? tarotCard(targetingItem.cardId) : null
+  const targetingDef = targetingItem
+    ? targetingItem.kind === 'spectral'
+      ? spectralCard(targetingItem.cardId)
+      : tarotCard(targetingItem.cardId)
+    : null
 
   const selectedCards = run.hand.filter((c) => run.selectedIds.includes(c.id))
   const preview = !targetingDef && selectedCards.length > 0 ? evaluateHand(selectedCards) : null
@@ -62,7 +67,7 @@ export function PlayingScreen() {
       useCard(instanceId, [])
       return
     }
-    const def = tarotCard(item.cardId)
+    const def = item.kind === 'spectral' ? spectralCard(item.cardId) : tarotCard(item.cardId)
     if (def.minTargets > 0) {
       startTargeting(instanceId)
     } else {
@@ -122,6 +127,7 @@ export function PlayingScreen() {
         <ConsumablesPanel
           consumables={run.consumables}
           phase={run.phase}
+          bonusConsumableSlots={run.bonusConsumableSlots}
           onUse={handleConsumableUse}
           onSell={sellCard}
           busy={!!targetingInstanceId}

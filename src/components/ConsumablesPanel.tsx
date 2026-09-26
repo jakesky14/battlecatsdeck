@@ -1,14 +1,16 @@
 import { tarotCard } from '../data/tarots'
 import { planetCard } from '../data/planets'
+import { spectralCard } from '../data/spectrals'
 import { handTypeDef } from '../data/handTypes'
 import type { ConsumableItem } from '../game/consumables'
-import { MAX_CONSUMABLE_SLOTS } from '../game/consumables'
-import { PLANET_SELL_VALUE, TAROT_SELL_VALUE } from '../game/cardMods'
+import { effectiveMaxConsumableSlots } from '../game/consumables'
+import { PLANET_SELL_VALUE, SPECTRAL_SELL_VALUE, TAROT_SELL_VALUE } from '../game/cardMods'
 import type { Phase } from '../game/runState'
 
 interface ConsumablesPanelProps {
   consumables: ConsumableItem[]
   phase: Phase
+  bonusConsumableSlots?: number
   onUse: (instanceId: string) => void
   onSell?: (instanceId: string) => void
   /** true while a targeting card is mid-selection (disables other Use buttons) */
@@ -23,7 +25,19 @@ function displayFor(item: ConsumableItem) {
       name: planet.name,
       description: `Levels up ${handTypeDef(planet.handType).label} instantly.`,
       needsTargets: false,
+      restrictedToHand: false,
       sellValue: PLANET_SELL_VALUE,
+    }
+  }
+  if (item.kind === 'spectral') {
+    const def = spectralCard(item.cardId)
+    return {
+      icon: def.icon,
+      name: def.name,
+      description: def.description,
+      needsTargets: def.minTargets > 0,
+      restrictedToHand: def.minTargets > 0 || def.requiresHand,
+      sellValue: SPECTRAL_SELL_VALUE,
     }
   }
   const def = tarotCard(item.cardId)
@@ -32,14 +46,16 @@ function displayFor(item: ConsumableItem) {
     name: def.name,
     description: def.description,
     needsTargets: def.minTargets > 0,
+    restrictedToHand: def.minTargets > 0,
     sellValue: TAROT_SELL_VALUE,
   }
 }
 
-export function ConsumablesPanel({ consumables, phase, onUse, onSell, busy }: ConsumablesPanelProps) {
+export function ConsumablesPanel({ consumables, phase, bonusConsumableSlots = 0, onUse, onSell, busy }: ConsumablesPanelProps) {
+  const slotCount = effectiveMaxConsumableSlots(bonusConsumableSlots)
   return (
     <div className="flex flex-wrap gap-3">
-      {Array.from({ length: MAX_CONSUMABLE_SLOTS }).map((_, i) => {
+      {Array.from({ length: slotCount }).map((_, i) => {
         const item = consumables[i]
         if (!item) {
           return (
@@ -52,8 +68,8 @@ export function ConsumablesPanel({ consumables, phase, onUse, onSell, busy }: Co
           )
         }
 
-        const { icon, name, description, needsTargets, sellValue } = displayFor(item)
-        const usable = !busy && (needsTargets ? phase === 'playing' : true)
+        const { icon, name, description, needsTargets, restrictedToHand, sellValue } = displayFor(item)
+        const usable = !busy && (restrictedToHand ? phase === 'playing' || phase === 'shop' : true)
 
         return (
           <div
@@ -68,7 +84,7 @@ export function ConsumablesPanel({ consumables, phase, onUse, onSell, busy }: Co
               type="button"
               onClick={() => onUse(item.instanceId)}
               disabled={!usable}
-              title={needsTargets && phase !== 'playing' ? 'Only usable while playing a hand' : undefined}
+              title={restrictedToHand && !usable ? 'Only usable while playing a hand or in the shop' : undefined}
               className="mt-1 w-full rounded bg-indigo-500 px-2 py-0.5 text-[11px] font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-indigo-400"
             >
               {needsTargets ? 'Select cards' : 'Use'}

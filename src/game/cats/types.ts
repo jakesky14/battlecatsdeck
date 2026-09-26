@@ -79,8 +79,19 @@ export const RARITY_LABELS: Record<Rarity, string> = {
   uber: 'Uber Rare',
 }
 
-/** Rarity tiers pulled from the Rare Cat Banner shop slots (excludes Normal/Special). */
-export const BANNER_RARITIES: Rarity[] = ['rare', 'super_rare', 'uber']
+export type CatRarityKey = 'common' | 'uncommon' | 'rare'
+
+/** Odds a Cat shop/pack slot lands on each rarity (Balatro's real Joker odds).
+ *  Super Rare and Uber ("Legendary") are never drawn through these normal odds —
+ *  they're only obtainable via Wraith (Rare only) and The Soul (Legendary). */
+export const CAT_RARITY_WEIGHTS: Record<CatRarityKey, number> = {
+  common: 70,
+  uncommon: 25,
+  rare: 5,
+}
+
+/** The "Legendary" pool that only The Soul (Spectral card) can pull from. */
+export const LEGENDARY_RARITIES: Rarity[] = ['super_rare', 'uber']
 
 /** Negative-edition Cats don't take up a Cat slot. */
 export function ownedCatSlotCount(cats: OwnedCat[]): number {

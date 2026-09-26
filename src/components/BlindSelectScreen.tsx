@@ -2,7 +2,9 @@ import { CatRow } from './CatRow'
 import { ClassicBlindPanel } from './ClassicBlindPanel'
 import { ConsumablesPanel } from './ConsumablesPanel'
 import { EnemyPanel } from './EnemyPanel'
-import { bossBlindForAnte, getEnemyForBlind } from '../game/blinds'
+import { getEnemyForBlind } from '../game/blinds'
+import { currentBossBlind, BOSS_REROLL_COST } from '../game/runState'
+import { hasVoucher } from '../game/vouchers'
 import { useGameStore } from '../state/useGameStore'
 
 export function BlindSelectScreen() {
@@ -12,9 +14,16 @@ export function BlindSelectScreen() {
   const useCard = useGameStore((s) => s.useCard)
   const sellCard = useGameStore((s) => s.sellCard)
   const moveCat = useGameStore((s) => s.moveCat)
+  const rerollBoss = useGameStore((s) => s.rerollBoss)
 
-  const enemy = getEnemyForBlind(run.ante, run.blind)
-  const bossDescription = run.blind === 'boss' ? bossBlindForAnte(run.ante).description : undefined
+  const boss = run.blind === 'boss' ? currentBossBlind(run) : undefined
+  const enemy = getEnemyForBlind(run.ante, run.blind, boss)
+  const bossDescription = boss?.description
+  const canRerollBoss =
+    run.blind === 'boss' &&
+    hasVoucher(run.ownedVouchers, 'directors_cut') &&
+    !run.bossRerollUsedThisAnte &&
+    run.money >= BOSS_REROLL_COST
 
   return (
     <div className="flex flex-col items-center gap-6 rounded-lg bg-zinc-900 p-8 text-center">
@@ -31,6 +40,17 @@ export function BlindSelectScreen() {
           score={0}
           description={bossDescription}
         />
+      )}
+
+      {run.blind === 'boss' && hasVoucher(run.ownedVouchers, 'directors_cut') && (
+        <button
+          type="button"
+          onClick={rerollBoss}
+          disabled={!canRerollBoss}
+          className="rounded-lg bg-purple-700 px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-purple-600"
+        >
+          {run.bossRerollUsedThisAnte ? 'Boss Blind already rerolled' : `Reroll Boss Blind ($${BOSS_REROLL_COST})`}
+        </button>
       )}
 
       <div className="flex gap-3">
@@ -62,6 +82,7 @@ export function BlindSelectScreen() {
         <ConsumablesPanel
           consumables={run.consumables}
           phase={run.phase}
+          bonusConsumableSlots={run.bonusConsumableSlots}
           onUse={(instanceId) => useCard(instanceId, [])}
           onSell={sellCard}
         />

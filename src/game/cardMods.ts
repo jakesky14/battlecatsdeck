@@ -77,13 +77,23 @@ export function editionPriceDelta(edition: CatEdition | undefined): number {
   return edition ? EDITION_PRICE_DELTA[edition] : 0
 }
 
-export function rollCatEdition(rng: () => number): CatEdition | undefined {
-  const result = pickWeighted(CAT_EDITION_WEIGHTS, rng)
+/** Hone doubles the odds of Foil/Holographic/Polychrome (not Negative/base). */
+function honedWeights<T extends Record<string, number>>(weights: T, honed: boolean): T {
+  if (!honed) return weights
+  const doubled = { ...weights }
+  for (const key of ['foil', 'holographic', 'polychrome'] as const) {
+    if (key in doubled) (doubled as Record<string, number>)[key] = doubled[key as keyof T] * 2
+  }
+  return doubled
+}
+
+export function rollCatEdition(rng: () => number, honed = false): CatEdition | undefined {
+  const result = pickWeighted(honedWeights(CAT_EDITION_WEIGHTS, honed), rng)
   return result === 'base' ? undefined : result
 }
 
-export function rollCardEdition(rng: () => number): CardEdition | undefined {
-  const result = pickWeighted(CARD_EDITION_WEIGHTS, rng)
+export function rollCardEdition(rng: () => number, honed = false): CardEdition | undefined {
+  const result = pickWeighted(honedWeights(CARD_EDITION_WEIGHTS, honed), rng)
   return result === 'base' ? undefined : result
 }
 

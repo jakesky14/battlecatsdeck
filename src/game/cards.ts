@@ -4,6 +4,7 @@ export type Suit = 'hearts' | 'diamonds' | 'clubs' | 'spades'
 export type Rank = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14
 
 export type Enhancement = 'bonus' | 'mult' | 'wild' | 'glass' | 'steel' | 'stone' | 'gold' | 'lucky'
+export const ENHANCEMENTS: Enhancement[] = ['bonus', 'mult', 'wild', 'glass', 'steel', 'stone', 'gold', 'lucky']
 export type Seal = 'gold' | 'red' | 'blue' | 'purple'
 /** Playing cards can't be Negative — that's Cat/consumable-only. */
 export type CardEdition = 'foil' | 'holographic' | 'polychrome'
@@ -21,6 +22,8 @@ export interface Card {
 
 export const SUITS: Suit[] = ['hearts', 'diamonds', 'clubs', 'spades']
 export const RANKS: Rank[] = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+export const FACE_RANKS: Rank[] = [11, 12, 13]
+export const NUMBERED_RANKS: Rank[] = [2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 const RANK_LABELS: Record<Rank, string> = {
   2: '2',
@@ -72,6 +75,22 @@ export function createDeck(): Card[] {
     }
   }
   return deck
+}
+
+let extraCardCounter = 0
+/** Builds a brand-new playing card not part of the base 52, for effects/packs
+ *  that add cards to the deck (Standard Packs, Familiar/Grim/Incantation/Cryptid). */
+export function createExtraCard(
+  patch: Partial<Pick<Card, 'rank' | 'suit' | 'enhancement' | 'seals' | 'edition'>>,
+  rng: () => number = Math.random,
+): Card {
+  extraCardCounter += 1
+  return {
+    id: `extra-${extraCardCounter}-${Date.now()}-${rng().toString(36).slice(2)}`,
+    suit: patch.suit ?? SUITS[Math.floor(rng() * SUITS.length)],
+    rank: patch.rank ?? RANKS[Math.floor(rng() * RANKS.length)],
+    ...patch,
+  }
 }
 
 export function shuffle<T>(items: T[], rng: () => number = Math.random): T[] {
