@@ -6,6 +6,7 @@ import {
   choosePackOption,
   createInitialRunState,
   discardSelected,
+  leaveShop,
   openPackSlot,
   playHand,
   reorderCats,
@@ -16,6 +17,7 @@ import {
   startRound,
   toggleSelect,
 } from '../runState'
+import { applyTarot } from '../tarot'
 import type { RunState } from '../runState'
 import type { ShopSlot } from '../shop'
 import type { OwnedCat } from '../cats/types'
@@ -232,6 +234,32 @@ describe('rerollBossBlind', () => {
     state = rerollBossBlind(state)
     expect(state.bossOverrideId).toBe(overrideAfterFirst)
     expect(state.money).toBe(40)
+  })
+})
+
+describe('hand carries forward from shop into the next round', () => {
+  it('the exact same hand persists, and a shop-phase Tarot edit on it sticks', () => {
+    let state = startRound(readyState())
+    state = { ...state, target: 0 } // force an immediate win on first play
+    const cardId = state.hand[0].id
+    state = toggleSelect(state, cardId)
+    state = playHand(state)
+    expect(state.phase).toBe('shop')
+
+    const handInShop = state.hand.map((c) => c.id).sort()
+    const targetCardId = state.hand[0].id
+    const previousRank = state.hand[0].rank
+
+    const { state: edited } = applyTarot('strength', state, [targetCardId])
+    state = edited
+
+    state = leaveShop(state)
+    state = startRound(state)
+
+    expect(state.phase).toBe('playing')
+    expect(state.hand.map((c) => c.id).sort()).toEqual(handInShop)
+    const carried = state.hand.find((c) => c.id === targetCardId)
+    expect(carried?.rank).toBe(previousRank === 14 ? 2 : previousRank + 1)
   })
 })
 

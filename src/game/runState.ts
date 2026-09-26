@@ -190,17 +190,31 @@ export function startRound(state: RunState): RunState {
   const boss = state.blind === 'boss' ? currentBossBlind(state) : null
 
   const removed = new Set(state.removedCardIds)
-  const deck = [...createDeck(), ...state.extraCards]
-    .filter((c) => !removed.has(c.id))
-    .map((c) => (state.cardOverrides[c.id] ? { ...c, ...state.cardOverrides[c.id] } : c))
-  const shuffled = shuffle(deck)
+  const withOverrides = (c: Card) => (state.cardOverrides[c.id] ? { ...c, ...state.cardOverrides[c.id] } : c)
+  const fullPool = [...createDeck(), ...state.extraCards].filter((c) => !removed.has(c.id)).map(withOverrides)
+
+  // The hand as left in the shop (including any Tarot/Spectral edits made
+  // there) carries forward unchanged — only the rest of the deck reshuffles.
+  const carriedHand = state.hand.filter((c) => !removed.has(c.id)).map(withOverrides)
+  const carriedIds = new Set(carriedHand.map((c) => c.id))
+  const shuffledRest = shuffle(fullPool.filter((c) => !carriedIds.has(c.id)))
 
   const roundHandSize = Math.max(
     1,
     HAND_SIZE + state.bonusHandSize - (boss?.effect === 'reduced_hand_size' ? 2 : 0),
   )
-  const hand = shuffled.slice(0, roundHandSize)
-  const drawPile = shuffled.slice(roundHandSize)
+
+  let hand = carriedHand
+  let drawPile = shuffledRest
+  if (hand.length < roundHandSize) {
+    const needed = roundHandSize - hand.length
+    hand = [...hand, ...drawPile.slice(0, needed)]
+    drawPile = drawPile.slice(needed)
+  } else if (hand.length > roundHandSize) {
+    const overflow = hand.slice(roundHandSize)
+    hand = hand.slice(0, roundHandSize)
+    drawPile = [...overflow, ...drawPile]
+  }
 
   const handsReduction = boss?.effect === 'reduced_hands' || boss?.effect === 'gauntlet' ? 1 : 0
   const handsRemaining = Math.max(1, STARTING_HANDS + state.bonusHandsPerRound - handsReduction)
