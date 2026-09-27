@@ -19,7 +19,8 @@ function ctx(overrides: Partial<PackGenContext> = {}): PackGenContext {
     excludeCatIds: [],
     handTypePlayCounts: createInitialRunState().handTypePlayCounts,
     hasTelescope: false,
-    hasHone: false,
+    editionTier: 0,
+    hasOmenGlobe: false,
     ...overrides,
   }
 }

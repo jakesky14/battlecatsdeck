@@ -35,7 +35,19 @@ import { applySpectral } from './spectral'
 import { GOLD_CARD_HELD_MONEY, PLANET_SELL_VALUE, SPECTRAL_SELL_VALUE, TAROT_SELL_VALUE, editionPriceDelta } from './cardMods'
 import { effectiveMaxConsumableSlots, type ConsumableItem } from './consumables'
 import { pick } from './rng'
-import { VOUCHERS, effectiveAnte, hasVoucher, interestCap, voucherDef, type VoucherId } from './vouchers'
+import {
+  VOUCHERS,
+  createInitialLifetimeProgress,
+  editionTier,
+  effectiveAnte,
+  hasUnlimitedBossReroll,
+  hasVoucher,
+  interestCap,
+  isVoucherEligible,
+  voucherDef,
+  type LifetimeProgress,
+  type VoucherId,
+} from './vouchers'
 
 export const HAND_SIZE = 8
 export const STARTING_HANDS = 4
@@ -115,6 +127,11 @@ export interface RunState {
   bossOverrideId: string | null
   bossRerollUsedThisAnte: boolean
   packOpening: PackOpeningState | null
+  /** Vouchers redeemed so far in THIS run only (Liquidation's "in one run" requirement). */
+  vouchersRedeemedThisRun: number
+  /** Meta-progress toward voucher upgrades that persists across runs — see
+   *  useGameStore.startNewRun, which carries this field forward. */
+  lifetime: LifetimeProgress
 }
 
 export function createInitialRunState(): RunState {
@@ -161,7 +178,20 @@ export function createInitialRunState(): RunState {
     bossOverrideId: null,
     bossRerollUsedThisAnte: false,
     packOpening: null,
+    vouchersRedeemedThisRun: 0,
+    lifetime: createInitialLifetimeProgress(),
   }
+}
+
+/** Applies a delta to the run's lifetime meta-progress (see LifetimeProgress). */
+function updateLifetime(state: RunState, updater: (l: LifetimeProgress) => Partial<LifetimeProgress>): RunState {
+  return { ...state, lifetime: { ...state.lifetime, ...updater(state.lifetime) } }
+}
+
+/** Tracks the all-time minimum hand size ever reached (Palette's unlock). */
+function trackMinHandSize(state: RunState): RunState {
+  const currentHandSize = HAND_SIZE + state.bonusHandSize
+  return updateLifetime(state, (l) => ({ minHandSizeReached: Math.min(l.minHandSizeReached, currentHandSize) }))
 }
 
 export function chooseMode(state: RunState, mode: GameMode): RunState {
@@ -188,6 +218,14 @@ function drawUpTo(hand: Card[], drawPile: Card[], size: number): { hand: Card[];
 export function startRound(state: RunState): RunState {
   if (state.phase !== 'blind-select') return state
   const boss = state.blind === 'boss' ? currentBossBlind(state) : null
+
+  const blindDiscoveryId = state.blind === 'boss' ? `boss-${boss!.id}` : state.blind
+  state = updateLifetime(state, (l) => ({
+    maxAnteReached: Math.max(l.maxAnteReached, state.ante),
+    discoveredBlindIds: l.discoveredBlindIds.includes(blindDiscoveryId)
+      ? l.discoveredBlindIds
+      : [...l.discoveredBlindIds, blindDiscoveryId],
+  }))
 
   const removed = new Set(state.removedCardIds)
   const withOverrides = (c: Card) => (state.cardOverrides[c.id] ? { ...c, ...state.cardOverrides[c.id] } : c)
@@ -319,17 +357,30 @@ function applyRoundEndHeldEffects(
   return { ...state, money, consumables }
 }
 
-function rollVoucherOffer(ownedVouchers: VoucherId[], rng: () => number = Math.random): VoucherId | null {
-  const pool = VOUCHERS.filter((v) => !ownedVouchers.includes(v.id))
+function rollVoucherOffer(state: RunState, rng: () => number = Math.random): VoucherId | null {
+  const pool = VOUCHERS.filter((v) =>
+    isVoucherEligible(v.id, state.ownedVouchers, {
+      lifetime: state.lifetime,
+      ownedCats: state.ownedCats,
+      vouchersRedeemedThisRun: state.vouchersRedeemedThisRun,
+    }),
+  )
   if (pool.length === 0) return null
   return pick(pool, rng).id
 }
 
 function winRound(state: RunState): RunState {
   const cap = interestCap(state.ownedVouchers)
-  const reward = BLIND_REWARD[state.blind] + interestEarned(state.money, cap)
+  const interest = interestEarned(state.money, cap)
+  const reward = BLIND_REWARD[state.blind] + interest
   const money = state.money + reward
   const ownedCats = state.ownedCats.map((c) => ({ ...c, disabledThisRound: false }))
+
+  state = updateLifetime(state, (l) => {
+    const hitCap = interest >= cap
+    const currentInterestStreak = hitCap ? l.currentInterestStreak + 1 : 0
+    return { currentInterestStreak, maxInterestStreak: Math.max(l.maxInterestStreak, currentInterestStreak) }
+  })
 
   if (state.blind === 'boss' && state.ante >= MAX_ANTE) {
     return { ...state, phase: 'victory', money, ownedCats }
@@ -345,6 +396,8 @@ function winRound(state: RunState): RunState {
     blind = 'small'
   }
 
+  state = updateLifetime(state, (l) => ({ maxAnteReached: Math.max(l.maxAnteReached, ante) }))
+
   const forceBuffoonPack = !state.hasSeenFirstShop
   const shopCtx: ShopGenContext = {
     excludeCatIds: ownedCats.map((c) => c.defId),
@@ -352,7 +405,7 @@ function winRound(state: RunState): RunState {
     forceBuffoonPack,
   }
   const shopOffers = generateShopSlots(shopCtx)
-  const voucherOffer = forceBuffoonPack || enteringNewAnte ? rollVoucherOffer(state.ownedVouchers) : state.voucherOffer
+  const voucherOffer = forceBuffoonPack || enteringNewAnte ? rollVoucherOffer(state) : state.voucherOffer
 
   return {
     ...state,
@@ -379,7 +432,9 @@ export function playHand(state: RunState): RunState {
   const playedCards = state.hand.filter((c) => state.selectedIds.includes(c.id))
   const remainingHand = state.hand.filter((c) => !state.selectedIds.includes(c.id))
 
-  const result = computeScore(playedCards, state.ownedCats, {
+  state = updateLifetime(state, (l) => ({ cardsPlayed: l.cardsPlayed + playedCards.length }))
+
+  let result = computeScore(playedCards, state.ownedCats, {
     discardsUsedThisRound: state.discardsUsedThisRound,
     handsPlayedThisRound: state.handsPlayedThisRound,
     ante: state.ante,
@@ -389,6 +444,16 @@ export function playHand(state: RunState): RunState {
     bannedSuit: state.bannedSuitThisRound,
     heldCards: remainingHand,
   })
+
+  if (hasVoucher(state.ownedVouchers, 'observatory')) {
+    const matchingPlanets = state.consumables.filter(
+      (c) => c.kind === 'planet' && planetCard(c.cardId).handType === result.handType,
+    ).length
+    if (matchingPlanets > 0) {
+      const mult = result.mult * Math.pow(1.5, matchingPlanets)
+      result = { ...result, mult, total: Math.round(result.chips * mult) }
+    }
+  }
 
   const roundScore = state.roundScore + result.total
   const handsRemaining = state.handsRemaining - 1
@@ -449,6 +514,8 @@ export function discardSelected(state: RunState): RunState {
   const remainingHand = state.hand.filter((c) => !state.selectedIds.includes(c.id))
   const { hand, drawPile } = drawUpTo(remainingHand, state.drawPile, state.roundHandSize)
 
+  state = updateLifetime(state, (l) => ({ cardsDiscarded: l.cardsDiscarded + discarded.length }))
+
   let consumables = state.consumables
   const created: string[] = []
   for (const card of discarded) {
@@ -487,6 +554,11 @@ export function buyShopSlot(state: RunState, slotId: string, rng: () => number =
   if (!slot) return state
   if (state.money < slot.cost) return state
 
+  // Pack slots track their own spend inside openPackSlot, to avoid double-counting.
+  if (slot.kind !== 'pack') {
+    state = updateLifetime(state, (l) => ({ totalSpentAtShop: l.totalSpentAtShop + slot.cost }))
+  }
+
   if (slot.kind === 'joker') {
     if (!slot.catId) return state
     if (ownedCatSlotCount(state.ownedCats) >= effectiveMaxCatSlots(state.bonusCatSlots)) return state
@@ -515,7 +587,7 @@ export function buyShopSlot(state: RunState, slotId: string, rng: () => number =
     const def = tarotCard(slot.tarotId)
     const item: ConsumableItem = { instanceId: newId(def.id), kind: 'tarot', cardId: def.id }
     return {
-      ...state,
+      ...updateLifetime(state, (l) => ({ tarotBoughtFromShop: l.tarotBoughtFromShop + 1 })),
       money: state.money - slot.cost,
       consumables: [...state.consumables, item],
       shopOffers: state.shopOffers.filter((s) => s.id !== slotId),
@@ -528,7 +600,7 @@ export function buyShopSlot(state: RunState, slotId: string, rng: () => number =
     const planet = planetCard(slot.planetId)
     const newLevel = (state.handLevels[planet.handType] ?? 1) + 1
     return {
-      ...state,
+      ...updateLifetime(state, (l) => ({ planetBoughtFromShop: l.planetBoughtFromShop + 1 })),
       money: state.money - slot.cost,
       handLevels: { ...state.handLevels, [planet.handType]: newLevel },
       lastConsumableUsed: { kind: 'planet', id: planet.id },
@@ -540,7 +612,7 @@ export function buyShopSlot(state: RunState, slotId: string, rng: () => number =
   if (slot.kind === 'playing_card') {
     if (!slot.card) return state
     return {
-      ...state,
+      ...updateLifetime(state, (l) => ({ playingCardsBoughtFromShop: l.playingCardsBoughtFromShop + 1 })),
       money: state.money - slot.cost,
       extraCards: [...state.extraCards, slot.card],
       shopOffers: state.shopOffers.filter((s) => s.id !== slotId),
@@ -563,13 +635,14 @@ export function openPackSlot(state: RunState, slotId: string, rng: () => number 
     excludeCatIds: state.ownedCats.map((c) => c.defId),
     handTypePlayCounts: state.handTypePlayCounts,
     hasTelescope: hasVoucher(state.ownedVouchers, 'telescope'),
-    hasHone: hasVoucher(state.ownedVouchers, 'hone'),
+    editionTier: editionTier(state.ownedVouchers),
+    hasOmenGlobe: hasVoucher(state.ownedVouchers, 'omen_globe'),
   }
   const options = generatePackOptions(slot.packCategory, slot.packSize, ctx, rng)
   const { choose } = PACK_CONTENTS[slot.packCategory][slot.packSize]
 
   return {
-    ...state,
+    ...updateLifetime(state, (l) => ({ totalSpentAtShop: l.totalSpentAtShop + slot.cost })),
     money: state.money - slot.cost,
     shopOffers: state.shopOffers.filter((s) => s.id !== slotId),
     packOpening: { slotId, category: slot.packCategory, size: slot.packSize, chooseRemaining: choose, options },
@@ -602,7 +675,15 @@ export function choosePackOption(
     if (targetIds.length < def.minTargets || targetIds.length > def.maxTargets) return state
   }
 
-  const { state: resolved, message } = resolvePackOption(entry.option, state, targetIds, rng)
+  let { state: resolved, message } = resolvePackOption(entry.option, state, targetIds, rng)
+  if (entry.option.kind === 'tarot') {
+    resolved = updateLifetime(resolved, (l) => ({ tarotFromPacks: l.tarotFromPacks + 1 }))
+  } else if (entry.option.kind === 'planet') {
+    resolved = updateLifetime(resolved, (l) => ({ planetFromPacks: l.planetFromPacks + 1 }))
+  } else if (entry.option.kind === 'spectral') {
+    resolved = trackMinHandSize(resolved)
+  }
+
   const remainingOptions = opening.options.filter((o) => o.optionId !== optionId)
   const chooseRemaining = opening.chooseRemaining - 1
   const packOpening =
@@ -624,18 +705,25 @@ export function buyVoucher(state: RunState): RunState {
   const def = voucherDef(id)
   if (state.money < def.cost) return state
 
-  let next: RunState = {
-    ...state,
-    money: state.money - def.cost,
-    ownedVouchers: [...state.ownedVouchers, id],
-    voucherOffer: null,
-  }
+  let next: RunState = updateLifetime(
+    {
+      ...state,
+      money: state.money - def.cost,
+      ownedVouchers: [...state.ownedVouchers, id],
+      voucherOffer: null,
+      vouchersRedeemedThisRun: state.vouchersRedeemedThisRun + 1,
+    },
+    (l) => ({ totalSpentAtShop: l.totalSpentAtShop + def.cost }),
+  )
 
-  if (id === 'grabber') next = { ...next, bonusHandsPerRound: next.bonusHandsPerRound + 1 }
-  if (id === 'wasteful') next = { ...next, bonusDiscardsPerRound: next.bonusDiscardsPerRound + 1 }
-  if (id === 'paint_brush') next = { ...next, bonusHandSize: next.bonusHandSize + 1 }
+  if (id === 'grabber' || id === 'nacho_tong') next = { ...next, bonusHandsPerRound: next.bonusHandsPerRound + 1 }
+  if (id === 'wasteful' || id === 'recyclomancy') next = { ...next, bonusDiscardsPerRound: next.bonusDiscardsPerRound + 1 }
+  if (id === 'paint_brush' || id === 'palette') next = { ...next, bonusHandSize: next.bonusHandSize + 1 }
   if (id === 'crystal_ball') next = { ...next, bonusConsumableSlots: next.bonusConsumableSlots + 1 }
+  if (id === 'antimatter') next = { ...next, bonusCatSlots: next.bonusCatSlots + 1 }
   if (id === 'hieroglyph') next = { ...next, bonusHandsPerRound: next.bonusHandsPerRound - 1 }
+  if (id === 'petroglyph') next = { ...next, bonusDiscardsPerRound: next.bonusDiscardsPerRound - 1 }
+  if (id === 'blenk') next = updateLifetime(next, (l) => ({ blankRedeemed: l.blankRedeemed + 1 }))
 
   return { ...next, message: `Bought ${def.icon} ${def.name}!` }
 }
@@ -644,7 +732,7 @@ export function buyVoucher(state: RunState): RunState {
 export function rerollBossBlind(state: RunState, rng: () => number = Math.random): RunState {
   if (state.phase !== 'blind-select' || state.blind !== 'boss') return state
   if (!hasVoucher(state.ownedVouchers, 'directors_cut')) return state
-  if (state.bossRerollUsedThisAnte) return state
+  if (state.bossRerollUsedThisAnte && !hasUnlimitedBossReroll(state.ownedVouchers)) return state
   if (state.money < BOSS_REROLL_COST) return state
 
   const current = currentBossBlind(state)
@@ -696,7 +784,7 @@ export function useConsumable(state: RunState, instanceId: string, targetIds: st
       consumables: state.consumables.filter((c) => c.instanceId !== instanceId),
     }
     const { state: nextState, message } = applySpectral(item.cardId as SpectralId, stateWithoutItem, targetIds)
-    return { ...nextState, selectedIds: [], message }
+    return { ...trackMinHandSize(nextState), selectedIds: [], message }
   }
 
   const def = TAROT_CARDS.find((t) => t.id === item.cardId)
@@ -749,7 +837,7 @@ export function rerollShop(state: RunState): RunState {
   const shopOffers = generateShopSlots(shopCtx)
 
   return {
-    ...state,
+    ...updateLifetime(state, (l) => ({ rerolls: l.rerolls + 1, totalSpentAtShop: l.totalSpentAtShop + cost })),
     money: state.money - cost,
     shopOffers,
     rerollsUsedThisShop: state.rerollsUsedThisShop + 1,

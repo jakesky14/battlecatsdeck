@@ -1,13 +1,13 @@
 import { CAT_ROSTER } from './cats/roster'
 import { CAT_RARITY_WEIGHTS, type CatRarityKey } from './cats/types'
 import type { Card } from './cards'
-import { RANKS, SUITS, createExtraCard } from './cards'
+import { ENHANCEMENTS, RANKS, SUITS, createExtraCard } from './cards'
 import { PLANET_CARDS } from '../data/planets'
 import { TAROT_CARDS, type TarotId } from '../data/tarots'
 import { PACK_SIZE_COST, rollPackVariant, type PackCategory, type PackSize } from './packs'
 import { pick, pickWeighted } from './rng'
 import { editionPriceDelta, rollCardEdition, rollCatEdition, type CatEdition } from './cardMods'
-import { applyClearanceSale, hasVoucher, rerollDiscount, shopCardSlotCount, type VoucherId } from './vouchers'
+import { applyClearanceSale, editionTier, hasVoucher, merchantMultiplier, rerollDiscount, shopCardSlotCount, type VoucherId } from './vouchers'
 
 export const MAX_CAT_SLOTS = 5
 export const BASE_REROLL_COST = 2
@@ -67,7 +67,7 @@ export interface ShopGenContext {
   forceBuffoonPack: boolean
 }
 
-function rollJokerSlot(used: Set<string>, honed: boolean, ownedVouchers: VoucherId[], rng: () => number): ShopSlot | null {
+function rollJokerSlot(used: Set<string>, tier: 0 | 1 | 2, ownedVouchers: VoucherId[], rng: () => number): ShopSlot | null {
   const rarity = pickWeighted(CAT_RARITY_WEIGHTS, rng) as CatRarityKey
   let pool = CAT_ROSTER.filter((c) => c.rarity === rarity && !used.has(c.id))
   if (pool.length === 0) {
@@ -76,16 +76,25 @@ function rollJokerSlot(used: Set<string>, honed: boolean, ownedVouchers: Voucher
   if (pool.length === 0) return null
 
   const def = pool[Math.floor(rng() * pool.length)]
-  const catEdition = rollCatEdition(rng, honed)
+  const catEdition = rollCatEdition(rng, tier)
   const cost = applyClearanceSale(def.cost + editionPriceDelta(catEdition), ownedVouchers)
   used.add(def.id)
   return { id: nextSlotId('joker', rng), kind: 'joker', catId: def.id, catEdition, cost }
 }
 
-function rollCardSlot(ctx: ShopGenContext, used: Set<string>, honed: boolean, rng: () => number): ShopSlot | null {
+/** Illusion: a Magic Trick playing card may roll a random Enhancement (40%)
+ *  or Edition (20%), independent of the normal Hone/Glow Up edition odds. */
+function rollIllusionModifiers(rng: () => number): Pick<Card, 'enhancement' | 'edition'> {
+  const roll = rng()
+  if (roll < 0.4) return { enhancement: pick(ENHANCEMENTS, rng) }
+  if (roll < 0.6) return { edition: pick(['foil', 'holographic', 'polychrome'] as const, rng) }
+  return {}
+}
+
+function rollCardSlot(ctx: ShopGenContext, used: Set<string>, tier: 0 | 1 | 2, rng: () => number): ShopSlot | null {
   const hasMagicTrick = hasVoucher(ctx.ownedVouchers, 'magic_trick')
-  const tarotBoost = hasVoucher(ctx.ownedVouchers, 'tarot_merchant') ? 2 : 1
-  const planetBoost = hasVoucher(ctx.ownedVouchers, 'planet_merchant') ? 2 : 1
+  const tarotBoost = merchantMultiplier(ctx.ownedVouchers, 'tarot')
+  const planetBoost = merchantMultiplier(ctx.ownedVouchers, 'planet')
 
   const weights: Record<string, number> = {
     joker: hasMagicTrick ? BASE_JOKER_WEIGHT - MAGIC_TRICK_WEIGHT : BASE_JOKER_WEIGHT,
@@ -96,7 +105,7 @@ function rollCardSlot(ctx: ShopGenContext, used: Set<string>, honed: boolean, rn
 
   const kind = pickWeighted(weights, rng)
 
-  if (kind === 'joker') return rollJokerSlot(used, honed, ctx.ownedVouchers, rng)
+  if (kind === 'joker') return rollJokerSlot(used, tier, ctx.ownedVouchers, rng)
 
   if (kind === 'tarot') {
     const def = pick(TAROT_CARDS, rng)
@@ -118,7 +127,12 @@ function rollCardSlot(ctx: ShopGenContext, used: Set<string>, honed: boolean, rn
     }
   }
 
-  const card = createExtraCard({ suit: pick(SUITS, rng), rank: pick(RANKS, rng), edition: rollCardEdition(rng, honed) }, rng)
+  // Illusion's own 40/20/40 enhancement/edition/plain split replaces the normal
+  // Hone/Glow Up edition roll entirely for this card, rather than stacking with it.
+  const modifiers = hasVoucher(ctx.ownedVouchers, 'illusion')
+    ? rollIllusionModifiers(rng)
+    : { edition: rollCardEdition(rng, tier) }
+  const card = createExtraCard({ suit: pick(SUITS, rng), rank: pick(RANKS, rng), ...modifiers }, rng)
   return {
     id: nextSlotId('card', rng),
     kind: 'playing_card',
@@ -132,12 +146,12 @@ function rollCardSlot(ctx: ShopGenContext, used: Set<string>, honed: boolean, rn
  *  runState.ts, since it only restocks after a Boss Blind. */
 export function generateShopSlots(ctx: ShopGenContext, rng: () => number = Math.random): ShopSlot[] {
   const used = new Set(ctx.excludeCatIds)
-  const honed = hasVoucher(ctx.ownedVouchers, 'hone')
+  const tier = editionTier(ctx.ownedVouchers)
   const slots: ShopSlot[] = []
 
   const cardSlotCount = shopCardSlotCount(ctx.ownedVouchers)
   for (let i = 0; i < cardSlotCount; i++) {
-    const slot = rollCardSlot(ctx, used, honed, rng)
+    const slot = rollCardSlot(ctx, used, tier, rng)
     if (slot) slots.push(slot)
   }
 

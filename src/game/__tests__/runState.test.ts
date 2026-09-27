@@ -11,16 +11,19 @@ import {
   playHand,
   reorderCats,
   rerollBossBlind,
+  rerollShop,
   sellCat,
   sellConsumable,
   skipPackOpening,
   startRound,
   toggleSelect,
+  useConsumable,
 } from '../runState'
 import { applyTarot } from '../tarot'
 import type { RunState } from '../runState'
 import type { ShopSlot } from '../shop'
 import type { OwnedCat } from '../cats/types'
+import type { ConsumableItem } from '../consumables'
 
 function selectAll(state: RunState, ids: string[]): RunState {
   return ids.reduce((s, id) => toggleSelect(s, id), state)
@@ -260,6 +263,138 @@ describe('hand carries forward from shop into the next round', () => {
     expect(state.hand.map((c) => c.id).sort()).toEqual(handInShop)
     const carried = state.hand.find((c) => c.id === targetCardId)
     expect(carried?.rank).toBe(previousRank === 14 ? 2 : previousRank + 1)
+  })
+})
+
+describe('lifetime meta-progress tracking', () => {
+  function shopState(overrides: Partial<RunState>): RunState {
+    return { ...readyState(), phase: 'shop', money: 1000, ...overrides }
+  }
+
+  it('playing cards adds to lifetime.cardsPlayed', () => {
+    let state = startRound(readyState())
+    state = toggleSelect(state, state.hand[0].id)
+    state = toggleSelect(state, state.hand[1].id)
+    state = playHand(state)
+    expect(state.lifetime.cardsPlayed).toBe(2)
+  })
+
+  it('discarding cards adds to lifetime.cardsDiscarded', () => {
+    let state = startRound(readyState())
+    state = toggleSelect(state, state.hand[0].id)
+    state = discardSelected(state)
+    expect(state.lifetime.cardsDiscarded).toBe(1)
+  })
+
+  it('buying a single Tarot/Planet/Playing Card from the shop tracks its own counter and total spend', () => {
+    const tarotSlot: ShopSlot = { id: 't1', kind: 'tarot', tarotId: 'hermit', cost: 3 }
+    let state = shopState({ shopOffers: [tarotSlot] })
+    state = buyShopSlot(state, 't1')
+    expect(state.lifetime.tarotBoughtFromShop).toBe(1)
+    expect(state.lifetime.totalSpentAtShop).toBe(3)
+
+    const planetSlot: ShopSlot = { id: 'p1', kind: 'planet', planetId: 'pluto', cost: 3 }
+    state = { ...state, shopOffers: [planetSlot] }
+    state = buyShopSlot(state, 'p1')
+    expect(state.lifetime.planetBoughtFromShop).toBe(1)
+    expect(state.lifetime.totalSpentAtShop).toBe(6)
+
+    const cardSlot: ShopSlot = { id: 'c1', kind: 'playing_card', card: { id: 'x', rank: 5, suit: 'hearts' }, cost: 1 }
+    state = { ...state, shopOffers: [cardSlot] }
+    state = buyShopSlot(state, 'c1')
+    expect(state.lifetime.playingCardsBoughtFromShop).toBe(1)
+    expect(state.lifetime.totalSpentAtShop).toBe(7)
+  })
+
+  it('rerolling the shop adds to lifetime.rerolls and totalSpentAtShop', () => {
+    let state = shopState({})
+    state = rerollShop(state)
+    expect(state.lifetime.rerolls).toBe(1)
+    expect(state.lifetime.totalSpentAtShop).toBe(2)
+  })
+
+  it('resolving a Tarot/Planet pack option tracks tarotFromPacks/planetFromPacks', () => {
+    const slot: ShopSlot = { id: 'pack1', kind: 'pack', packCategory: 'celestial', packSize: 'normal', cost: 4 }
+    let state = shopState({ shopOffers: [slot] })
+    state = openPackSlot(state, 'pack1')
+    const optionId = state.packOpening!.options[0].optionId
+    state = choosePackOption(state, optionId, [])
+    expect(state.lifetime.planetFromPacks).toBe(1)
+  })
+
+  it("buying Blenk tracks lifetime.blankRedeemed", () => {
+    let state = shopState({ voucherOffer: 'blenk' })
+    state = buyVoucher(state)
+    expect(state.lifetime.blankRedeemed).toBe(1)
+  })
+
+  it('Nacho Tong/Recyclomancy/Palette/Antimatter stack additively with their base vouchers', () => {
+    let state = shopState({ voucherOffer: 'grabber' })
+    state = buyVoucher(state)
+    state = { ...state, voucherOffer: 'nacho_tong' }
+    state = buyVoucher(state)
+    expect(state.bonusHandsPerRound).toBe(2)
+
+    state = { ...state, voucherOffer: 'antimatter' }
+    state = buyVoucher(state)
+    expect(state.bonusCatSlots).toBe(1)
+  })
+
+  it('Petroglyph reduces discards on top of Hieroglyph reducing hands', () => {
+    let state = shopState({ voucherOffer: 'hieroglyph' })
+    state = buyVoucher(state)
+    expect(state.bonusHandsPerRound).toBe(-1)
+    state = { ...state, voucherOffer: 'petroglyph' }
+    state = buyVoucher(state)
+    expect(state.bonusDiscardsPerRound).toBe(-1)
+    expect(state.bonusHandsPerRound).toBe(-1) // untouched by Petroglyph
+  })
+
+  it("Retcon removes Director's Cut's once-per-Ante Boss reroll limit", () => {
+    let state: RunState = {
+      ...readyState(),
+      phase: 'blind-select',
+      blind: 'boss',
+      money: 1000,
+      ownedVouchers: ['directors_cut', 'retcon'],
+    }
+    state = rerollBossBlind(state)
+    const firstOverride = state.bossOverrideId
+    expect(state.bossRerollUsedThisAnte).toBe(true)
+    state = rerollBossBlind(state)
+    expect(state.bossOverrideId).not.toBe(firstOverride)
+  })
+
+  it('Observatory gives x1.5 Mult per held Planet consumable matching the played hand', () => {
+    const pairPlanet: ConsumableItem = { instanceId: 'p1', kind: 'planet', cardId: 'mercury' } // mercury -> pair
+    let state = startRound({ ...readyState(), ownedVouchers: ['telescope', 'observatory'], consumables: [pairPlanet] })
+    // force a pair: two 5s plus 3 unrelated low cards, selecting only the pair
+    const hand = [
+      { id: 'a', rank: 5 as const, suit: 'hearts' as const },
+      { id: 'b', rank: 5 as const, suit: 'clubs' as const },
+      { id: 'c', rank: 2 as const, suit: 'spades' as const },
+    ]
+    state = { ...state, hand, target: 999999 }
+    state = toggleSelect(state, 'a')
+    state = toggleSelect(state, 'b')
+    const withoutObservatory: RunState = { ...state, ownedVouchers: ['telescope'] }
+    const boosted = playHand(state)
+    const unboosted = playHand(withoutObservatory)
+    expect(boosted.lastResult!.mult).toBeCloseTo(unboosted.lastResult!.mult * 1.5)
+  })
+
+  it('reducing hand size via a Spectral card tracks lifetime.minHandSizeReached', () => {
+    const ouija: ConsumableItem = { instanceId: 'o1', kind: 'spectral', cardId: 'ouija' }
+    let state = startRound(readyState())
+    state = { ...state, consumables: [ouija] }
+    state = useConsumable(state, 'o1', [])
+    expect(state.lifetime.minHandSizeReached).toBe(7) // HAND_SIZE(8) - 1
+  })
+
+  it('startRound tracks discoveredBlindIds and maxAnteReached', () => {
+    const state = startRound(readyState())
+    expect(state.lifetime.discoveredBlindIds).toContain('small')
+    expect(state.lifetime.maxAnteReached).toBeGreaterThanOrEqual(1)
   })
 })
 

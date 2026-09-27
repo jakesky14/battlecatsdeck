@@ -1,5 +1,5 @@
 import type { Card, Enhancement, Rank, Suit } from './cards'
-import { ENHANCEMENT_LABELS } from './cardMods'
+import { ENHANCEMENT_LABELS, rollCatEdition } from './cardMods'
 import { rankLabel, suitSymbol } from './cards'
 import { CAT_ROSTER, catDef } from './cats/roster'
 import type { OwnedCat } from './cats/types'
@@ -8,6 +8,7 @@ import { PLANET_CARDS, planetCard } from '../data/planets'
 import { TAROT_CARDS, tarotCard, type TarotId } from '../data/tarots'
 import { pick } from './rng'
 import { effectiveMaxCatSlots } from './packs'
+import { editionTier } from './vouchers'
 import { MAX_CONSUMABLE_SLOTS, type ConsumableItem } from './consumables'
 import type { RunState } from './runState'
 
@@ -210,14 +211,16 @@ function applyJudgement(state: RunState, rng: () => number): TarotResult {
     return { state, message: '⚡ Judgement: no Cats left to create.' }
   }
   const def = pick(pool, rng)
+  const edition = rollCatEdition(rng, editionTier(state.ownedVouchers))
   const instance: OwnedCat = {
     instanceId: newConsumableId(def.id, rng),
     defId: def.id,
     disabledThisRound: false,
+    edition,
   }
   return {
     state: { ...state, ownedCats: [...state.ownedCats, instance] },
-    message: `⚡ Judgement creates a ${def.name}!`,
+    message: edition ? `⚡ Judgement creates a ${edition} ${def.name}!` : `⚡ Judgement creates a ${def.name}!`,
   }
 }
 

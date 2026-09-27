@@ -55,7 +55,9 @@ export const useGameStore = create<GameStore>()(
   persist(
     (set) => ({
       run: createInitialRunState(),
-      startNewRun: () => set({ run: createInitialRunState() }),
+      // Lifetime meta-progress (see LifetimeProgress) survives a new run — it's
+      // how voucher upgrades track things like total money ever spent at shops.
+      startNewRun: () => set((s) => ({ run: { ...createInitialRunState(), lifetime: s.run.lifetime } })),
       pickMode: (mode) => set((s) => ({ run: chooseMode(s.run, mode) })),
       playBlind: () => set((s) => ({ run: startRound(s.run) })),
       skip: () => set((s) => ({ run: skipBlind(s.run) })),
@@ -77,6 +79,6 @@ export const useGameStore = create<GameStore>()(
       buyVoucherOffer: () => set((s) => ({ run: buyVoucher(s.run) })),
       rerollBoss: () => set((s) => ({ run: rerollBossBlind(s.run) })),
     }),
-    { name: 'battlecatsdeck-run-v6' },
+    { name: 'battlecatsdeck-run-v7' },
   ),
 )

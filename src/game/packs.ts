@@ -94,8 +94,14 @@ export interface PackGenContext {
   excludeCatIds: string[]
   handTypePlayCounts: Record<HandTypeId, number>
   hasTelescope: boolean
-  hasHone: boolean
+  editionTier: 0 | 1 | 2
+  hasOmenGlobe: boolean
 }
+
+/** Omen Globe: each Arcana Pack card slot has this chance to be a Spectral
+ *  card instead of a Tarot card — no rate was specified for this, so it
+ *  follows the genre's usual "occasional alternate" rate. */
+const OMEN_GLOBE_SPECTRAL_CHANCE = 0.2
 
 function mostPlayedHandType(counts: Record<HandTypeId, number>): HandTypeId {
   let best: HandTypeId = HAND_TYPES[0].id
@@ -129,10 +135,13 @@ export function generatePackOptions(
   const { count } = PACK_CONTENTS[category][size]
 
   if (category === 'arcana') {
-    return Array.from({ length: count }, (_, i) => ({
-      optionId: `t${i}`,
-      option: { kind: 'tarot', id: pick(TAROT_CARDS, rng).id },
-    }))
+    return Array.from({ length: count }, (_, i) => {
+      const option: PackOption =
+        ctx.hasOmenGlobe && rng() < OMEN_GLOBE_SPECTRAL_CHANCE
+          ? { kind: 'spectral', id: pick(SPECTRAL_CARDS, rng).id }
+          : { kind: 'tarot', id: pick(TAROT_CARDS, rng).id }
+      return { optionId: `t${i}`, option }
+    })
   }
 
   if (category === 'celestial') {
@@ -157,7 +166,7 @@ export function generatePackOptions(
   if (category === 'standard') {
     return Array.from({ length: count }, (_, i) => {
       const card = createExtraCard(
-        { suit: pick(SUITS, rng), rank: pick(RANKS, rng), edition: rollCardEdition(rng, ctx.hasHone) },
+        { suit: pick(SUITS, rng), rank: pick(RANKS, rng), edition: rollCardEdition(rng, ctx.editionTier) },
         rng,
       )
       return { optionId: `c${i}`, option: { kind: 'playing_card', card } }

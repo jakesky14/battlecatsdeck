@@ -48,12 +48,29 @@ export const HOLOGRAPHIC_MULT = 10
 export const POLYCHROME_MULT_X = 1.5
 
 // -- Shop odds --
-/** Odds a Cat appears for sale with each edition (sums to 100). */
+/** Odds a Cat appears for sale with each edition (sums to 100).
+ *  Foil/Holographic scale by a clean 2x/4x under Hone/Glow Up, but
+ *  Polychrome doesn't follow that same multiplier, so each tier is its
+ *  own explicit table rather than a doubling formula. */
 export const CAT_EDITION_WEIGHTS: Record<CatEdition | 'base', number> = {
   base: 96,
   foil: 2,
   holographic: 1.4,
   polychrome: 0.3,
+  negative: 0.3,
+}
+export const CAT_EDITION_WEIGHTS_HONE: Record<CatEdition | 'base', number> = {
+  base: 96,
+  foil: 4,
+  holographic: 2.8,
+  polychrome: 0.9,
+  negative: 0.3,
+}
+export const CAT_EDITION_WEIGHTS_GLOW_UP: Record<CatEdition | 'base', number> = {
+  base: 96,
+  foil: 8,
+  holographic: 5.6,
+  polychrome: 2.1,
   negative: 0.3,
 }
 
@@ -63,6 +80,18 @@ export const CARD_EDITION_WEIGHTS: Record<CardEdition | 'base', number> = {
   foil: 4,
   holographic: 2.8,
   polychrome: 1.2,
+}
+export const CARD_EDITION_WEIGHTS_HONE: Record<CardEdition | 'base', number> = {
+  base: 92,
+  foil: 8,
+  holographic: 5.6,
+  polychrome: 2.4,
+}
+export const CARD_EDITION_WEIGHTS_GLOW_UP: Record<CardEdition | 'base', number> = {
+  base: 92,
+  foil: 16,
+  holographic: 11.2,
+  polychrome: 4.8,
 }
 
 /** Foil/Holographic/Polychrome all cost/sell the same extra amount; Negative is Cat/consumable-only. */
@@ -77,23 +106,16 @@ export function editionPriceDelta(edition: CatEdition | undefined): number {
   return edition ? EDITION_PRICE_DELTA[edition] : 0
 }
 
-/** Hone doubles the odds of Foil/Holographic/Polychrome (not Negative/base). */
-function honedWeights<T extends Record<string, number>>(weights: T, honed: boolean): T {
-  if (!honed) return weights
-  const doubled = { ...weights }
-  for (const key of ['foil', 'holographic', 'polychrome'] as const) {
-    if (key in doubled) (doubled as Record<string, number>)[key] = doubled[key as keyof T] * 2
-  }
-  return doubled
-}
-
-export function rollCatEdition(rng: () => number, honed = false): CatEdition | undefined {
-  const result = pickWeighted(honedWeights(CAT_EDITION_WEIGHTS, honed), rng)
+/** 0 = base odds, 1 = Hone, 2 = Glow Up — see `editionTier` in vouchers.ts. */
+export function rollCatEdition(rng: () => number, tier: 0 | 1 | 2 = 0): CatEdition | undefined {
+  const weights = tier === 2 ? CAT_EDITION_WEIGHTS_GLOW_UP : tier === 1 ? CAT_EDITION_WEIGHTS_HONE : CAT_EDITION_WEIGHTS
+  const result = pickWeighted(weights, rng)
   return result === 'base' ? undefined : result
 }
 
-export function rollCardEdition(rng: () => number, honed = false): CardEdition | undefined {
-  const result = pickWeighted(honedWeights(CARD_EDITION_WEIGHTS, honed), rng)
+export function rollCardEdition(rng: () => number, tier: 0 | 1 | 2 = 0): CardEdition | undefined {
+  const weights = tier === 2 ? CARD_EDITION_WEIGHTS_GLOW_UP : tier === 1 ? CARD_EDITION_WEIGHTS_HONE : CARD_EDITION_WEIGHTS
+  const result = pickWeighted(weights, rng)
   return result === 'base' ? undefined : result
 }
 
