@@ -209,6 +209,31 @@ describe('buyVoucher', () => {
     state = buyVoucher(state)
     expect(state.ownedVouchers).toHaveLength(0)
   })
+
+  it('Clearance Sale discounts the voucher price by 25%, rounded down', () => {
+    let state: RunState = {
+      ...readyState(),
+      phase: 'shop',
+      money: 20,
+      voucherOffer: 'grabber',
+      ownedVouchers: ['clearance_sale'],
+    }
+    state = buyVoucher(state)
+    expect(state.money).toBe(20 - 7) // floor(10 * 0.75) = 7
+    expect(state.lifetime.totalSpentAtShop).toBe(7)
+  })
+
+  it("Liquidation's 50% discount replaces Clearance Sale's rate for vouchers too", () => {
+    let state: RunState = {
+      ...readyState(),
+      phase: 'shop',
+      money: 20,
+      voucherOffer: 'grabber',
+      ownedVouchers: ['clearance_sale', 'liquidation'],
+    }
+    state = buyVoucher(state)
+    expect(state.money).toBe(20 - 5)
+  })
 })
 
 describe('rerollBossBlind', () => {

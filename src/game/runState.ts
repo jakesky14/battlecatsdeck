@@ -37,6 +37,7 @@ import { effectiveMaxConsumableSlots, type ConsumableItem } from './consumables'
 import { pick } from './rng'
 import {
   VOUCHERS,
+  applyClearanceSale,
   createInitialLifetimeProgress,
   editionTier,
   effectiveAnte,
@@ -703,17 +704,18 @@ export function buyVoucher(state: RunState): RunState {
   const id = state.voucherOffer
   if (state.ownedVouchers.includes(id)) return state
   const def = voucherDef(id)
-  if (state.money < def.cost) return state
+  const cost = applyClearanceSale(def.cost, state.ownedVouchers)
+  if (state.money < cost) return state
 
   let next: RunState = updateLifetime(
     {
       ...state,
-      money: state.money - def.cost,
+      money: state.money - cost,
       ownedVouchers: [...state.ownedVouchers, id],
       voucherOffer: null,
       vouchersRedeemedThisRun: state.vouchersRedeemedThisRun + 1,
     },
-    (l) => ({ totalSpentAtShop: l.totalSpentAtShop + def.cost }),
+    (l) => ({ totalSpentAtShop: l.totalSpentAtShop + cost }),
   )
 
   if (id === 'grabber' || id === 'nacho_tong') next = { ...next, bonusHandsPerRound: next.bonusHandsPerRound + 1 }

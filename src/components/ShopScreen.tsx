@@ -13,7 +13,7 @@ import { spectralCard } from '../data/spectrals'
 import { handTypeDef } from '../data/handTypes'
 import { PACK_CONTENTS, effectiveMaxCatSlots, packLabel, type PackOption } from '../game/packs'
 import { rerollCost, type ShopSlot } from '../game/shop'
-import { voucherDef } from '../game/vouchers'
+import { applyClearanceSale, voucherDef } from '../game/vouchers'
 import { useGameStore } from '../state/useGameStore'
 
 function SlotShell({
@@ -138,7 +138,17 @@ function PackSlotCard({ slot, affordable, onOpen }: { slot: ShopSlot; affordable
   )
 }
 
-function VoucherSlotCard({ id, affordable, onBuy }: { id: string; affordable: boolean; onBuy: () => void }) {
+function VoucherSlotCard({
+  id,
+  cost,
+  affordable,
+  onBuy,
+}: {
+  id: string
+  cost: number
+  affordable: boolean
+  onBuy: () => void
+}) {
   const def = voucherDef(id as Parameters<typeof voucherDef>[0])
   return (
     <SlotShell
@@ -147,7 +157,7 @@ function VoucherSlotCard({ id, affordable, onBuy }: { id: string; affordable: bo
       title={def.name}
       subtitle="Voucher"
       description={def.description}
-      actionLabel={`Buy $${def.cost}`}
+      actionLabel={`Buy $${cost}`}
       affordable={affordable}
       onAction={onBuy}
     />
@@ -377,7 +387,8 @@ export function ShopScreen() {
           {run.voucherOffer ? (
             <VoucherSlotCard
               id={run.voucherOffer}
-              affordable={run.money >= voucherDef(run.voucherOffer).cost}
+              cost={applyClearanceSale(voucherDef(run.voucherOffer).cost, run.ownedVouchers)}
+              affordable={run.money >= applyClearanceSale(voucherDef(run.voucherOffer).cost, run.ownedVouchers)}
               onBuy={buyVoucherOffer}
             />
           ) : (
