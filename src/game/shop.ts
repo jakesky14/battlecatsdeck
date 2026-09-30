@@ -10,7 +10,7 @@ import { editionPriceDelta, rollCardEdition, rollCatEdition, type CatEdition } f
 import { applyClearanceSale, editionTier, hasVoucher, merchantMultiplier, rerollDiscount, shopCardSlotCount, type VoucherId } from './vouchers'
 
 export const MAX_CAT_SLOTS = 5
-export const BASE_REROLL_COST = 2
+export const BASE_REROLL_COST = 5
 export const PACK_SLOT_COUNT = 2
 
 /** Single-card shop slot prices — not specified by the design doc, set to
@@ -43,8 +43,14 @@ export interface ShopSlot {
   cost: number
 }
 
-export function rerollCost(rerollsUsedThisShop: number, ownedVouchers: VoucherId[]): number {
-  return Math.max(0, BASE_REROLL_COST + rerollsUsedThisShop - rerollDiscount(ownedVouchers))
+/** D6 Tag passes `base: 0` for the shop visit it was granted for — rerolls
+ *  that visit start at $0 instead of BASE_REROLL_COST, still +$1 per reroll. */
+export function rerollCost(
+  rerollsUsedThisShop: number,
+  ownedVouchers: VoucherId[],
+  base: number = BASE_REROLL_COST,
+): number {
+  return Math.max(0, base + rerollsUsedThisShop - rerollDiscount(ownedVouchers))
 }
 
 let slotCounter = 0

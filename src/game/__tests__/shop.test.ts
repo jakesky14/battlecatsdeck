@@ -48,13 +48,22 @@ describe('generateShopSlots', () => {
 })
 
 describe('rerollCost', () => {
-  it('increases by $1 per reroll already used this shop', () => {
-    expect(rerollCost(0, [])).toBe(2)
-    expect(rerollCost(1, [])).toBe(3)
+  it('starts at $5 and increases by $1 per reroll already used this shop', () => {
+    expect(rerollCost(0, [])).toBe(5)
+    expect(rerollCost(1, [])).toBe(6)
   })
 
-  it('Reroll Surplus takes $2 off, floored at $0', () => {
-    expect(rerollCost(0, ['reroll_surplus'])).toBe(0)
-    expect(rerollCost(3, ['reroll_surplus'])).toBe(3)
+  it('Reroll Surplus takes $2 off', () => {
+    expect(rerollCost(0, ['reroll_surplus'])).toBe(3)
+    expect(rerollCost(3, ['reroll_surplus'])).toBe(6)
+  })
+
+  it('the discount floors at $0 rather than going negative', () => {
+    expect(rerollCost(0, ['reroll_surplus', 'reroll_glut'], 0)).toBe(0)
+  })
+
+  it('D6 Tag: an explicit base of 0 starts rerolls at $0 for that shop visit', () => {
+    expect(rerollCost(0, [], 0)).toBe(0)
+    expect(rerollCost(2, [], 0)).toBe(2)
   })
 })

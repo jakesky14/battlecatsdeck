@@ -14,6 +14,7 @@ import {
   rerollShop,
   sellCat,
   sellConsumable,
+  skipBlind,
   skipPackOpening,
   startRound,
   toggleSelect,
@@ -335,7 +336,7 @@ describe('lifetime meta-progress tracking', () => {
     let state = shopState({})
     state = rerollShop(state)
     expect(state.lifetime.rerolls).toBe(1)
-    expect(state.lifetime.totalSpentAtShop).toBe(2)
+    expect(state.lifetime.totalSpentAtShop).toBe(5)
   })
 
   it('resolving a Tarot/Planet pack option tracks tarotFromPacks/planetFromPacks', () => {
@@ -462,5 +463,108 @@ describe('seals integrated through play/discard', () => {
     // start money 4 + gold card $3 held + (blind reward $3 + interest floor(7/5)=1) = 11
     expect(state.money).toBe(11)
     expect(state.consumables.some((c) => c.kind === 'planet' && c.cardId === 'pluto')).toBe(true)
+  })
+})
+
+describe('skipBlind grants a Tag instead of flat money', () => {
+  const low = () => 0
+
+  it('advances the blind, grants a Tag, and increments blindsSkippedThisRun', () => {
+    let state = readyState()
+    state = skipBlind(state, low)
+    expect(state.blind).toBe('big')
+    expect(state.blindsSkippedThisRun).toBe(1)
+    expect(state.message).toBeTruthy()
+  })
+
+  it('cannot skip the Boss Blind', () => {
+    let state: RunState = { ...readyState(), blind: 'boss' }
+    const before = state
+    state = skipBlind(state, low)
+    expect(state).toEqual(before)
+  })
+
+  it('two skips in a row can each grant a Tag (blindsSkippedThisRun keeps counting)', () => {
+    let state = readyState()
+    state = skipBlind(state, low) // small -> big
+    state = skipBlind(state, low) // big -> boss
+    expect(state.blind).toBe('boss')
+    expect(state.blindsSkippedThisRun).toBe(2)
+  })
+})
+
+describe('winRound applies pending Tag effects to the next shop', () => {
+  it('a pending Uncommon Joker and free-shop flag both land on the generated shop', () => {
+    let state = startRound(readyState())
+    state = { ...state, target: 0, pendingUncommonJoker: true, pendingFreeShop: true }
+    state = toggleSelect(state, state.hand[0].id)
+    state = playHand(state)
+
+    expect(state.phase).toBe('shop')
+    expect(state.pendingUncommonJoker).toBe(false)
+    expect(state.pendingFreeShop).toBe(false)
+    expect(state.shopOffers.every((s) => s.cost === 0)).toBe(true)
+    expect(state.shopOffers.some((s) => s.kind === 'joker')).toBe(true)
+  })
+
+  it('Investment Tag pays out on Boss Blind defeat, not Small/Big', () => {
+    let state = startRound(readyState())
+    state = { ...state, target: 0, blind: 'boss', pendingInvestmentPayouts: 1 }
+    state = toggleSelect(state, state.hand[0].id)
+    state = playHand(state)
+    // start $4 + boss reward $5 + interest floor(4/5)=0 + $25 investment payout = 34
+    expect(state.money).toBe(34)
+    expect(state.pendingInvestmentPayouts).toBe(0)
+  })
+
+  it('D6 Tag makes rerolls in the next shop start at $0', () => {
+    let state = startRound(readyState())
+    state = { ...state, target: 0, pendingCheapReroll: true, money: 1000 }
+    state = toggleSelect(state, state.hand[0].id)
+    state = playHand(state)
+    expect(state.cheapRerollThisShop).toBe(true)
+
+    const beforeReroll = state.money
+    state = rerollShop(state)
+    expect(beforeReroll - state.money).toBe(0) // first reroll of the visit costs $0
+
+    state = leaveShop(state)
+    expect(state.cheapRerollThisShop).toBe(false) // resets after leaving
+  })
+})
+
+describe('startRound applies Juggle Tag’s hand-size bonus once', () => {
+  it('adds the pending bonus to hand size, then clears it', () => {
+    let state = { ...readyState(), juggleBonusNextRound: 3 }
+    state = startRound(state)
+    expect(state.hand).toHaveLength(11) // HAND_SIZE 8 + 3
+    expect(state.juggleBonusNextRound).toBe(0)
+  })
+})
+
+describe('playHand tracks handsPlayedThisRun and unusedDiscardsThisRun', () => {
+  it('increments handsPlayedThisRun on every play', () => {
+    let state = startRound(readyState())
+    state = { ...state, target: 999999 }
+    state = toggleSelect(state, state.hand[0].id)
+    state = playHand(state)
+    expect(state.handsPlayedThisRun).toBe(1)
+  })
+
+  it('adds leftover discardsRemaining to unusedDiscardsThisRun at round end', () => {
+    let state = startRound(readyState())
+    state = { ...state, target: 0 } // win on first play, discardsRemaining still at 3
+    state = toggleSelect(state, state.hand[0].id)
+    state = playHand(state)
+    expect(state.unusedDiscardsThisRun).toBe(3)
+  })
+})
+
+describe('syncObtainedEditions unlocks the edition Tags', () => {
+  it('buying an edition Cat from the shop records it in lifetime.obtainedEditions', () => {
+    const slot: ShopSlot = { id: 'slot1', kind: 'joker', catId: 'cat', catEdition: 'foil', cost: 5 }
+    let state: RunState = { ...readyState(), phase: 'shop', money: 100, shopOffers: [slot] }
+    state = buyShopSlot(state, 'slot1')
+    expect(state.lifetime.obtainedEditions).toContain('foil')
   })
 })

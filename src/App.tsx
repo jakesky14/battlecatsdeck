@@ -1,6 +1,7 @@
 import { BlindSelectScreen } from './components/BlindSelectScreen'
 import { EndScreen } from './components/EndScreen'
 import { ModeSelectScreen } from './components/ModeSelectScreen'
+import { PackOpeningPanel } from './components/PackOpeningPanel'
 import { PlayingScreen } from './components/PlayingScreen'
 import { ShopScreen } from './components/ShopScreen'
 import { TopBar } from './components/TopBar'
@@ -19,12 +20,20 @@ function App() {
 
       {showTopBar && <TopBar run={run} />}
 
-      {run.phase === 'mode-select' && <ModeSelectScreen />}
-      {run.phase === 'blind-select' && <BlindSelectScreen />}
-      {run.phase === 'playing' && <PlayingScreen />}
-      {run.phase === 'shop' && <ShopScreen />}
-      {run.phase === 'game-over' && <EndScreen victory={false} />}
-      {run.phase === 'victory' && <EndScreen victory={true} />}
+      {run.packOpening ? (
+        // A Pack (bought or Tag-granted, e.g. Charm/Standard/Meteor/Buffoon/Ethereal
+        // Tag) takes over the screen regardless of the current phase.
+        <PackOpeningPanel />
+      ) : (
+        <>
+          {run.phase === 'mode-select' && <ModeSelectScreen />}
+          {run.phase === 'blind-select' && <BlindSelectScreen />}
+          {run.phase === 'playing' && <PlayingScreen />}
+          {run.phase === 'shop' && <ShopScreen />}
+          {run.phase === 'game-over' && <EndScreen victory={false} />}
+          {run.phase === 'victory' && <EndScreen victory={true} />}
+        </>
+      )}
     </div>
   )
 }

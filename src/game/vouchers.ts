@@ -1,4 +1,5 @@
 import type { OwnedCat } from './cats/types'
+import type { CatEdition } from './cardMods'
 
 export type VoucherId =
   | 'overstock'
@@ -339,6 +340,9 @@ export interface LifetimeProgress {
   discoveredBlindIds: string[]
   maxAnteReached: number
   minHandSizeReached: number
+  /** Every Cat/card edition ever obtained, in any run — Foil/Holographic/
+   *  Polychrome/Negative Tag unlocks (Balatro's real "in any run" wording). */
+  obtainedEditions: CatEdition[]
 }
 
 export function createInitialLifetimeProgress(): LifetimeProgress {
@@ -358,6 +362,7 @@ export function createInitialLifetimeProgress(): LifetimeProgress {
     discoveredBlindIds: [],
     maxAnteReached: 1,
     minHandSizeReached: 8, // starting HAND_SIZE, duplicated here to avoid a runState.ts import cycle
+    obtainedEditions: [],
   }
 }
 

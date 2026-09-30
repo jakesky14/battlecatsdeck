@@ -2,6 +2,7 @@ import { CatRow } from './CatRow'
 import { ClassicBlindPanel } from './ClassicBlindPanel'
 import { ConsumablesPanel } from './ConsumablesPanel'
 import { EnemyPanel } from './EnemyPanel'
+import { PendingTagsPanel } from './PendingTagsPanel'
 import { getEnemyForBlind } from '../game/blinds'
 import { currentBossBlind, BOSS_REROLL_COST } from '../game/runState'
 import { hasVoucher } from '../game/vouchers'
@@ -67,10 +68,12 @@ export function BlindSelectScreen() {
             onClick={skip}
             className="rounded-lg bg-zinc-700 px-6 py-2 font-semibold hover:bg-zinc-600"
           >
-            Skip (+$1)
+            Skip for a Tag
           </button>
         )}
       </div>
+
+      <PendingTagsPanel run={run} />
 
       <div className="w-full">
         <div className="mb-2 text-sm font-semibold text-zinc-300">Your Cats</div>

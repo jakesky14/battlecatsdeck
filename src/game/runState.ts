@@ -12,7 +12,6 @@ import {
   BLIND_REWARD,
   BOSS_BLINDS,
   MAX_ANTE,
-  SKIP_BONUS,
   bossBlindById,
   bossBlindForAnte,
   interestEarned,
@@ -49,6 +48,8 @@ import {
   type LifetimeProgress,
   type VoucherId,
 } from './vouchers'
+import { applyPendingShopTags, applyPendingVoucherTag, grantTag } from './tags'
+import type { CatEdition } from './cardMods'
 
 export const HAND_SIZE = 8
 export const STARTING_HANDS = 4
@@ -133,6 +134,35 @@ export interface RunState {
   /** Meta-progress toward voucher upgrades that persists across runs — see
    *  useGameStore.startNewRun, which carries this field forward. */
   lifetime: LifetimeProgress
+
+  // -- Tags (skip-Blind rewards) --
+  /** Uncommon/Rare Tag: forces a free Cat of that rarity into the next shop. */
+  pendingUncommonJoker: boolean
+  pendingRareJoker: boolean
+  /** Foil/Holographic/Polychrome/Negative Tag: the next base-edition shop
+   *  Joker becomes free and gets this edition. Persists across shop visits
+   *  until a matching Joker slot actually appears. */
+  pendingFreeEdition: CatEdition | null
+  /** Voucher Tag: forces a Voucher offer into the next shop. */
+  pendingVoucherTag: boolean
+  /** Coupon Tag: the next shop's initial cards/packs are free. */
+  pendingFreeShop: boolean
+  /** D6 Tag: rerolls in the next shop start at $0 — becomes
+   *  `cheapRerollThisShop` once that shop is generated. */
+  pendingCheapReroll: boolean
+  cheapRerollThisShop: boolean
+  /** Double Tag: the next Tag granted (Double Tag excluded) applies twice. */
+  pendingDoubleTag: boolean
+  /** Investment Tag: $25 paid per pending count when this Ante's Boss Blind is beaten. */
+  pendingInvestmentPayouts: number
+  /** Juggle Tag: added to hand size for the next round only, then cleared. */
+  juggleBonusNextRound: number
+  /** Speed Tag reads this; incremented on every skip regardless of the Tag rolled. */
+  blindsSkippedThisRun: number
+  /** Handy Tag reads this. */
+  handsPlayedThisRun: number
+  /** Garbage Tag reads this — accumulated at the end of every round. */
+  unusedDiscardsThisRun: number
 }
 
 export function createInitialRunState(): RunState {
@@ -181,6 +211,19 @@ export function createInitialRunState(): RunState {
     packOpening: null,
     vouchersRedeemedThisRun: 0,
     lifetime: createInitialLifetimeProgress(),
+    pendingUncommonJoker: false,
+    pendingRareJoker: false,
+    pendingFreeEdition: null,
+    pendingVoucherTag: false,
+    pendingFreeShop: false,
+    pendingCheapReroll: false,
+    cheapRerollThisShop: false,
+    pendingDoubleTag: false,
+    pendingInvestmentPayouts: 0,
+    juggleBonusNextRound: 0,
+    blindsSkippedThisRun: 0,
+    handsPlayedThisRun: 0,
+    unusedDiscardsThisRun: 0,
   }
 }
 
@@ -193,6 +236,28 @@ function updateLifetime(state: RunState, updater: (l: LifetimeProgress) => Parti
 function trackMinHandSize(state: RunState): RunState {
   const currentHandSize = HAND_SIZE + state.bonusHandSize
   return updateLifetime(state, (l) => ({ minHandSizeReached: Math.min(l.minHandSizeReached, currentHandSize) }))
+}
+
+/** Sweeps every Cat/card edition currently in play into lifetime.obtainedEditions
+ *  (Foil/Holographic/Polychrome/Negative Tag unlocks: "obtain a ___ card in any
+ *  run"). Called after any action that could newly introduce an edition (shop
+ *  purchases, Tarot/Spectral effects, pack picks) rather than at each of the
+ *  many individual grant sites, so nothing gets missed. */
+function syncObtainedEditions(state: RunState): RunState {
+  const catEditions = state.ownedCats.map((c) => c.edition).filter((e): e is CatEdition => !!e)
+  const cardEditions: CatEdition[] = [...state.hand, ...state.drawPile, ...state.discardPile, ...state.extraCards]
+    .map((c) => c.edition)
+    .filter((e): e is Exclude<typeof e, undefined> => !!e)
+  const seen = new Set(state.lifetime.obtainedEditions)
+  let changed = false
+  for (const e of [...catEditions, ...cardEditions]) {
+    if (!seen.has(e)) {
+      seen.add(e)
+      changed = true
+    }
+  }
+  if (!changed) return state
+  return updateLifetime(state, () => ({ obtainedEditions: Array.from(seen) }))
 }
 
 export function chooseMode(state: RunState, mode: GameMode): RunState {
@@ -240,7 +305,7 @@ export function startRound(state: RunState): RunState {
 
   const roundHandSize = Math.max(
     1,
-    HAND_SIZE + state.bonusHandSize - (boss?.effect === 'reduced_hand_size' ? 2 : 0),
+    HAND_SIZE + state.bonusHandSize + state.juggleBonusNextRound - (boss?.effect === 'reduced_hand_size' ? 2 : 0),
   )
 
   let hand = carriedHand
@@ -280,6 +345,7 @@ export function startRound(state: RunState): RunState {
     roundScore: 0,
     target: targetScore(ante, state.blind, boss ?? undefined),
     roundHandSize,
+    juggleBonusNextRound: 0,
     catsDisabledThisRound: boss?.effect === 'disable_cats',
     bannedSuitThisRound: boss?.effect === 'ban_suit' ? boss.bannedSuit ?? null : null,
     moneyDrainThisRound: boss?.effect === 'money_drain',
@@ -374,7 +440,6 @@ function winRound(state: RunState): RunState {
   const cap = interestCap(state.ownedVouchers)
   const interest = interestEarned(state.money, cap)
   const reward = BLIND_REWARD[state.blind] + interest
-  const money = state.money + reward
   const ownedCats = state.ownedCats.map((c) => ({ ...c, disabledThisRound: false }))
 
   state = updateLifetime(state, (l) => {
@@ -382,6 +447,12 @@ function winRound(state: RunState): RunState {
     const currentInterestStreak = hitCap ? l.currentInterestStreak + 1 : 0
     return { currentInterestStreak, maxInterestStreak: Math.max(l.maxInterestStreak, currentInterestStreak) }
   })
+
+  // Investment Tag: pays out now, while `blind` still reflects the Boss Blind just beaten.
+  const investmentPayout = state.blind === 'boss' ? state.pendingInvestmentPayouts * 25 : 0
+  if (investmentPayout > 0) state = { ...state, pendingInvestmentPayouts: 0 }
+
+  const money = state.money + reward + investmentPayout
 
   if (state.blind === 'boss' && state.ante >= MAX_ANTE) {
     return { ...state, phase: 'victory', money, ownedCats }
@@ -405,8 +476,18 @@ function winRound(state: RunState): RunState {
     ownedVouchers: state.ownedVouchers,
     forceBuffoonPack,
   }
-  const shopOffers = generateShopSlots(shopCtx)
-  const voucherOffer = forceBuffoonPack || enteringNewAnte ? rollVoucherOffer(state) : state.voucherOffer
+  let shopOffers = generateShopSlots(shopCtx)
+  let voucherOffer = forceBuffoonPack || enteringNewAnte ? rollVoucherOffer(state) : state.voucherOffer
+
+  const shopTags = applyPendingShopTags(state, shopOffers)
+  state = shopTags.state
+  shopOffers = shopTags.shopOffers
+
+  const voucherTag = applyPendingVoucherTag(state, voucherOffer)
+  state = voucherTag.state
+  voucherOffer = voucherTag.voucherOffer
+
+  const investmentMessage = investmentPayout > 0 ? ` Investment Tag: +$${investmentPayout}!` : ''
 
   return {
     ...state,
@@ -421,7 +502,7 @@ function winRound(state: RunState): RunState {
     bossOverrideId: enteringNewAnte ? null : state.bossOverrideId,
     bossRerollUsedThisAnte: enteringNewAnte ? false : state.bossRerollUsedThisAnte,
     rerollsUsedThisShop: 0,
-    message: `Round won! +$${reward}`,
+    message: `Round won! +$${reward}${investmentMessage}`,
   }
 }
 
@@ -484,6 +565,7 @@ export function playHand(state: RunState): RunState {
     money,
     lastResult: result,
     handTypePlayCounts,
+    handsPlayedThisRun: state.handsPlayedThisRun + 1,
   }
 
   if (result.destroyedCardIds.length > 0) {
@@ -497,9 +579,11 @@ export function playHand(state: RunState): RunState {
   }
 
   if (won) {
+    next = { ...next, unusedDiscardsThisRun: next.unusedDiscardsThisRun + next.discardsRemaining }
     next = applyRoundEndHeldEffects(next, remainingHand, true, result.handType)
     next = winRound(next)
   } else if (lost) {
+    next = { ...next, unusedDiscardsThisRun: next.unusedDiscardsThisRun + next.discardsRemaining }
     next = applyRoundEndHeldEffects(next, remainingHand, false, null)
     next = { ...next, phase: 'game-over' }
   }
@@ -540,16 +624,25 @@ export function discardSelected(state: RunState): RunState {
   }
 }
 
-export function skipBlind(state: RunState): RunState {
+export function skipBlind(state: RunState, rng: () => number = Math.random): RunState {
   if (state.phase !== 'blind-select' || state.blind === 'boss') return state
-  const money = state.money + SKIP_BONUS
   const blind: BlindKind = state.blind === 'small' ? 'big' : 'boss'
   const ante = effectiveAnte(state.ante, state.ownedVouchers)
-  const boss = blind === 'boss' ? currentBossBlind(state) : undefined
-  return { ...state, money, blind, target: targetScore(ante, blind, boss) }
+
+  const { state: next, message } = grantTag(
+    { ...state, blindsSkippedThisRun: state.blindsSkippedThisRun + 1 },
+    rng,
+  )
+
+  const boss = blind === 'boss' ? currentBossBlind(next) : undefined
+  return { ...next, blind, target: targetScore(ante, blind, boss), message }
 }
 
 export function buyShopSlot(state: RunState, slotId: string, rng: () => number = Math.random): RunState {
+  return syncObtainedEditions(buyShopSlotInner(state, slotId, rng))
+}
+
+function buyShopSlotInner(state: RunState, slotId: string, rng: () => number = Math.random): RunState {
   if (state.phase !== 'shop') return state
   const slot = state.shopOffers.find((s) => s.id === slotId)
   if (!slot) return state
@@ -659,6 +752,15 @@ export function choosePackOption(
   targetIds: string[],
   rng: () => number = Math.random,
 ): RunState {
+  return syncObtainedEditions(choosePackOptionInner(state, optionId, targetIds, rng))
+}
+
+function choosePackOptionInner(
+  state: RunState,
+  optionId: string,
+  targetIds: string[],
+  rng: () => number = Math.random,
+): RunState {
   const opening = state.packOpening
   if (!opening || opening.chooseRemaining <= 0) return state
   const entry = opening.options.find((o) => o.optionId === optionId)
@@ -757,6 +859,10 @@ export function rerollBossBlind(state: RunState, rng: () => number = Math.random
  *  hand — either mid-round (`playing`) or from the leftover hand while in
  *  the shop, matching how Tarot/Spectral cards opened from a pack work. */
 export function useConsumable(state: RunState, instanceId: string, targetIds: string[]): RunState {
+  return syncObtainedEditions(useConsumableInner(state, instanceId, targetIds))
+}
+
+function useConsumableInner(state: RunState, instanceId: string, targetIds: string[]): RunState {
   const usablePhases: Phase[] = ['blind-select', 'playing', 'shop']
   if (!usablePhases.includes(state.phase)) return state
 
@@ -828,7 +934,7 @@ export function sellCat(state: RunState, instanceId: string): RunState {
 
 export function rerollShop(state: RunState): RunState {
   if (state.phase !== 'shop') return state
-  const cost = rerollCost(state.rerollsUsedThisShop, state.ownedVouchers)
+  const cost = rerollCost(state.rerollsUsedThisShop, state.ownedVouchers, state.cheapRerollThisShop ? 0 : undefined)
   if (state.money < cost) return state
 
   const shopCtx: ShopGenContext = {
@@ -850,5 +956,11 @@ export function leaveShop(state: RunState): RunState {
   if (state.phase !== 'shop') return state
   const ante = effectiveAnte(state.ante, state.ownedVouchers)
   const boss = state.blind === 'boss' ? currentBossBlind(state) : undefined
-  return { ...state, phase: 'blind-select', target: targetScore(ante, state.blind, boss), message: null }
+  return {
+    ...state,
+    phase: 'blind-select',
+    target: targetScore(ante, state.blind, boss),
+    cheapRerollThisShop: false,
+    message: null,
+  }
 }
